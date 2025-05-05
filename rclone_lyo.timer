@@ -1,0 +1,9 @@
+[Unit]
+Description=rclone periodically
+
+[Timer]
+Unit=rclone_lyo.service
+OnCalendar=*-*-* *:00:00
+
+[Install]
+WantedBy=timers.target

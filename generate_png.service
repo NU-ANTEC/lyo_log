@@ -1,0 +1,15 @@
+[Unit]
+Description=plotting for lyophilizer
+After=network.target
+
+[Service]
+Type=exec
+WorkingDirectory=/home/xxxx/Documents/labconco_log
+ExecStart=/home/xxxx/.venv/labconco/bin/python /home/xxxx/Documents/labconco_log/generate_png.py
+Restart=always
+Restartsec=3s
+User=xxxx
+Group=xxxx
+
+[Install]
+WantedBy=multi-user.target

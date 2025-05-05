@@ -1,0 +1,9 @@
+[Unit]
+Description=Rclone upload lyo log
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/xxxx/Documents/labconco_log
+ExecStart=/home/xxxx/.venv/labconco/bin/python /home/xxxx/Documents/labconco_log/rclone_lyo.py
+User=xxxx
+Group=xxxx
