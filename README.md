@@ -1,5 +1,5 @@
 # lyo_log
-Logger for old Labconco Freezone lyophilizer. Tested on Raspberry Pi 3B+ running Bookworm. This set of script was prompt-engineered by ChatGPT and Copilot.
+Logger for old Labconco Freezone lyophilizer. At Northwestern University's ANTEC core facility, we operate two mid-2010s Freezone 6 Plus lyophilizers, one with a stoppering shelf. We generated this code to monitor the instrument health and to provide users with sample logs. Tested on Raspberry Pi 3B+ running Bookworm. This set of script was prompt-engineered by ChatGPT and Copilot.
 
 ## Requirement
 
