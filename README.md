@@ -7,7 +7,7 @@ Logger for old Labconco Freezone lyophilizer. At Northwestern University's ANTEC
 - Labconco cable for RS-232 (see below for alternative)
 - RS232-USB converter cable
 - Rclone (https://rclone.org) for uploading data
-- Python 3 with pyserial and matplotlib. I created a virtual environment and ran python inside.
+- Python 3 with pyserial, dotenv and matplotlib. I created a virtual environment and ran python inside.
 
 ## File description
 - labconco_log.py: Records the RS-232 output line by line and outputs file per day. Purges older files at startup.
