@@ -12,7 +12,8 @@ Logger for old Labconco Freezone lyophilizer. At Northwestern University's ANTEC
 ## File description
 - labconco_log.py: Records the RS-232 output line by line and outputs file per day. Purges older files at startup.
 - generate_png.py: Outputs PNG plots every minute.
-- generate_png_shelf.py: Outputs PNG plots for shelf lyophilizers.
+- generate_png_shelf.py: Outputs PNG plots for shelf lyophilizers. You can set the email alert threshold.
+- send_email_alert.py: Subroutine for sending alert emails. Requires Gmail setup with .env.
 
 Please read manuals from Labconco to understand the output format from the RS-232 port.
 Example systemd services and timers are included.
