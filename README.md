@@ -26,3 +26,5 @@ Below is the Labconco cable drawing.
 ![image](https://github.com/user-attachments/assets/d1e74c2f-63f0-4bc2-b2db-69833f65bb5d)
 
 For the DB9-RJ12 converter, you need to connect *the rightmost wire (when looking into the port with notch up) from RJ12* to pin 2 on DB9, and the leftmost wire from RJ12 to pin 5 on DB9. If you flip this, the script will give you garbled readout.
+
+We have had issues with ttyUSB0 device locking up (https://github.com/raspberrypi/linux/issues/5211). My workaround has been to monitor with journalctl, and reboot when the log shows this particular error. ttyerror_reboot.sh is included for this purpose.
