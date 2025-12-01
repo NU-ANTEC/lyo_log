@@ -7,7 +7,7 @@ Type=exec
 WorkingDirectory=/home/xxxx/Documents/labconco_log
 ExecStart=/home/xxxx/.venv/labconco/bin/python /home/xxxx/Documents/labconco_log/generate_png.py
 Restart=always
-Restartsec=3s
+RestartSec=3s
 User=xxxx
 Group=xxxx
 
