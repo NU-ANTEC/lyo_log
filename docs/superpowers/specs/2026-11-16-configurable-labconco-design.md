@@ -44,8 +44,12 @@ pressure measurements use µbar; temperatures use °C. Do not infer conversions
 from front-panel display settings.
 
 Stoppering Tray Dryers and Bulk Tray Dryers are different instruments and use
-separate parser families. The user has supplied base and stoppering records but
-does not have a Bulk Tray Dryer. Bulk support is manual-derived and unverified on
+separate parser families. Combined base-plus-stoppering output and direct
+stoppering-only output are two connection/reporting modes of the same stoppering
+system, not different instrument models. The direct connection bypasses the
+currently faulty base-to-tray communication link and does not carry base telemetry.
+The user has supplied base and stoppering records but does not have a Bulk Tray
+Dryer. Bulk support is manual-derived and unverified on
 hardware. Its documented 4800-baud default is not an observed operating result.
 Fixture tests validate the implementation against the manual, not real-device
 compatibility. Do not require the user to perform a bulk hardware test or change
@@ -82,7 +86,7 @@ Use these public settings, documented with units and defaults in `.env.example`:
 
 | Group | Settings and behavior |
 | --- | --- |
-| Instrument | `LABCONCO_STYLE=freezone\|stoppering\|bulk`, generic `INSTRUMENT_NAME`, and `BASE_TELEMETRY_EXPECTED` |
+| Input mode | `LABCONCO_STYLE=freezone\|stoppering_combined\|stoppering_direct\|bulk` and generic `INSTRUMENT_NAME` |
 | Serial | `SERIAL_PORT`, optional `SERIAL_BAUDRATE`, `SERIAL_TIMEOUT_SECONDS`; fixed 8N1 |
 | Paths | `LOG_DIRECTORY`, `PNG_DIRECTORY`, `ALERT_FLAG_FILE`, `ALERT_LOG_FILE` |
 | Plot | `PLOT_INTERVAL_SECONDS`, `PLOT_WIDTH_INCHES`, `PLOT_HEIGHT_INCHES`, `PRESSURE_MIN_UBAR`, `PRESSURE_MAX_UBAR`, `TEMPERATURE_MIN_C`, `TEMPERATURE_MAX_C` |
@@ -92,12 +96,21 @@ Use these public settings, documented with units and defaults in `.env.example`:
 | Retention | `DATA_RETENTION_DAYS`; zero disables deletion |
 | Diagnostics | `LOG_LEVEL`, default `INFO`; permit standard Python severity names |
 
-`LABCONCO_STYLE` is required. A missing or blank baud override uses 2400 for
-`freezone`/`stoppering` and 4800 for `bulk`. An explicit baud override is allowed.
-Base telemetry defaults to expected for `freezone` and `stoppering`, and not
-expected for `bulk`. Shelf-only installations set it false. Reject contradictory
-expectations: `freezone` requires true, `bulk` requires false, and `stoppering`
-allows either value.
+`LABCONCO_STYLE` is required and selects the reporting mode, not just the model
+family. A missing or blank baud override uses 2400 for `freezone`,
+`stoppering_combined`, and `stoppering_direct`, and 4800 for `bulk`. An explicit
+baud override is allowed. Expected telemetry follows the selected mode; do not
+add a separate base-expectation boolean that could contradict it:
+
+| Mode | Serial record | Expected telemetry |
+| --- | --- | --- |
+| `freezone` | `B<...>` | Base only |
+| `stoppering_combined` | `B<...>TD<...>` | Base and stoppering tray |
+| `stoppering_direct` | `:<...>` | Stoppering tray only; base absence is intentional |
+| `bulk` | `RUN/STOP/OPEN, ...` | Bulk trays; manual-derived, not hardware-verified |
+
+Operators switch between combined and direct stoppering connections by changing
+`LABCONCO_STYLE` and restarting the relevant services, without editing Python.
 
 Default paths are `./data` for logs, the log directory for PNGs,
 `./state/alert_active.flag` for alert state, and `./state/alerts.log` for alert
@@ -145,9 +158,13 @@ of 0600.
 ## Parsers and measurement model
 
 Keep all parser functions in `generate_png.py`. Explicit configuration chooses
-the parser family; do not fall back between families after malformed input.
-Within `stoppering`, support combined, base-only partial, and direct shelf records
-so a partial record does not discard available measurements.
+one reporting-mode parser; do not auto-switch modes or fall back after malformed
+input. The two stoppering parsers share channel normalization, but combined and
+direct frames remain explicitly selected. In combined mode, retain measurements
+from a valid partial base or tray block and report the expected missing block.
+Do not interpret an intentionally selected direct connection as a failed combined
+connection. Frames from an incompatible mode produce a configuration/format
+diagnostic rather than silently changing the selection.
 
 Each parsed record has its time and optional named measurements: collector
 temperature, base pressure, shelf/system temperature, shelf pressure, probes
@@ -192,10 +209,11 @@ Keep the existing daily hour axis and distinguish base and shelf pressure in the
 legend. Plot configured title, source date, bulk setpoint, and available channels.
 Legends must not claim that an absent channel has measurements.
 
-For a shelf-only installation, show shelf pressure, system temperature, and valid
+For `stoppering_direct`, show shelf pressure, system temperature, and valid
 probes. Omit collector/base traces and annotate `Base telemetry unavailable
-(configured shelf-only)`; do not invent base data. If base telemetry was expected
-but is absent in the latest recognized record, distinguish that as unexpected.
+(direct stoppering connection)`; do not invent base data. For
+`stoppering_combined`, absent base or tray telemetry in the latest recognized
+record is unexpected and must be distinguished from intentional direct operation.
 Keep earlier valid base readings as history, with gaps afterward. If no valid
 pressure exists, retain an explicitly labeled unavailable-pressure panel for
 pressure-capable styles. Bulk plots have no pressure panel.
@@ -247,7 +265,7 @@ that all use the same project directory/configuration. Recommend unbuffered Pyth
 for service diagnostics. Do not put real credentials in unit files. Explain that
 systemd does not need `EnvironmentFile` because Python loads `.env` itself.
 
-Document configurations for base-only, combined stoppering, direct shelf-only,
+Document configurations for base-only, combined stoppering, direct stoppering-only,
 and bulk-tray installations. Label bulk examples and support as manual-derived,
 unverified on hardware, and separate from the stoppering profile. Preserve the
 explicit baud override for future hardware qualification. Warn that the old
@@ -260,6 +278,8 @@ Acceptance tests use `unittest`, temporary directories, mocks, and Matplotlib's
 headless backend:
 
 1. All four supplied records parse to the expected distinct channels and metadata.
+   Combined and direct stoppering samples use their explicitly selected modes;
+   mismatched modes produce diagnostics rather than auto-selection.
 2. The manual's bulk example distinguishes runtime from shelf 5; missing sensors,
    malformed records, compact keys, blanks, and indefinite time are covered.
 3. Each style creates a nonempty PNG. Tests inspect plotted data/labels for correct
