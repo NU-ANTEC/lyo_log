@@ -1,6 +1,7 @@
 # Configurable Labconco logging and plotting
 
-Status: conversation design approved; written specification pending user review.
+Status: approved for implementation on a new branch; planning approval waived by
+the user. Hardware validation will be performed separately on the Pis.
 
 ## Goal and scope
 
