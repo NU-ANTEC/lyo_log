@@ -11,13 +11,16 @@ Keep recording, plotting, email delivery, and uploading as separate operations.
 
 This change covers `labconco_log.py`, `generate_png.py`, the compatibility entry
 point `generate_png_shelf.py`, `send_alert_email.py`, and `rclone_lyo.py`. Add a
-shared `lyo_config.py`, `.env.example`, dependency instructions, tests, and migration
-documentation. Update example service files where needed, without modifying any
-running Pi or enabling services automatically.
+shared `lyo_config.py`, a narrowly scoped `usb_recovery.py`, `.env.example`,
+dependency instructions, tests, and migration documentation. Add serial reconnect
+recovery, opt-in adapter-only USB reset, and README instructions for both logger
+supervision and an optional Pi hardware watchdog. Update example service files
+where needed, without modifying any running Pi or enabling services automatically.
 
-USB recovery, controller configuration, journal retention, instrument control,
-new operating-state alarm policies, and web interfaces are out of scope. Bulk
-Tray Dryers are excluded because no hardware is available for validation; add no
+Automatic Pi reboot on serial silence, whole-controller resets, controller-driver
+configuration changes, journal retention, instrument control, new operating-state
+alarm policies, and web interfaces are out of scope. Bulk Tray Dryers are excluded
+because no hardware is available for validation; add no
 bulk parser, configuration mode, plotting layout, or sample-data test suite.
 
 ## References and observed records
@@ -26,10 +29,12 @@ The existing `generate_png_shelf.py` is the reference for combined base/shelf
 measurements and plotting labels, not for its string-splitting implementation.
 It currently requires base fields and silently skips unsupported records.
 
-Manufacturer references, using the printed page numbers:
+Protocol and platform references; manual pages use printed page numbers:
 
 - [FreeZone 6, 12 and 18 Liter manual, Chapter 6, pp. 33–34](https://www.labconco.com/download/freezone-6-12-and-18-liter-freeze-dry-systems-ma/2HAAkjkFQE7FvPyN6HxcDw).
 - [Stoppering Tray Dryers manual, Chapter 6, pp. 30–31](https://www.labconco.com/download/freezone-stoppering-tray-dryers-manual/7bTeYHdi1bzTDXRawrIQyJ).
+- [systemd 252 hardware-watchdog configuration](https://github.com/systemd/systemd/blob/v252/man/systemd-system.conf.xml), matching the Bookworm systemd generation.
+- [Raspberry Pi 6.12 BCM2835 watchdog driver](https://github.com/raspberrypi/linux/blob/rpi-6.12.y/drivers/watchdog/bcm2835_wdt.c).
 
 User-supplied fixtures, with no deployment identifiers:
 
@@ -56,6 +61,10 @@ use the existing 2400-baud configuration and the user's actual sample records.
   deleting files, rendering plots, sending mail, or starting subprocesses.
 - `labconco_log.py` records the raw payload with the existing `HHMMSS` prefix in
   daily `YYMMDD.txt` files. Keep immediate flush/fsync and quiet per-record output.
+  Own its serial connection and recover without spawning a second reader.
+- `usb_recovery.py` resolves an explicitly identified USB adapter and optionally
+  issues Linux `USBDEVFS_RESET`. It never resets a hub/controller, detaches the
+  entire driver module, runs a shell, invokes sudo, or reboots the Pi.
 - `generate_png.py` contains the parser functions, shared measurement model,
   plotting, and the existing alert evaluation integration. A guarded `main()`
   runs the monitor; importing the module has no external side effects.
@@ -83,6 +92,8 @@ Use these public settings, documented with units and defaults in `.env.example`:
 | --- | --- |
 | Input mode | `LABCONCO_STYLE=freezone\|stoppering_combined\|stoppering_direct` and generic `INSTRUMENT_NAME` |
 | Serial | `SERIAL_PORT`, optional `SERIAL_BAUDRATE`, `SERIAL_TIMEOUT_SECONDS`; fixed 8N1 |
+| Serial recovery | `SERIAL_RECOVERY_ENABLED`, `SERIAL_EXPECTED_INTERVAL_SECONDS`, `SERIAL_IDLE_TIMEOUT_SECONDS`, `SERIAL_REOPEN_ATTEMPTS`, `SERIAL_RETRY_INITIAL_SECONDS`, `SERIAL_RETRY_MAX_SECONDS` |
+| Optional USB reset | `USB_RESET_ENABLED`, `USB_VENDOR_ID`, `USB_PRODUCT_ID`, `USB_SERIAL_NUMBER`, `USB_RESET_MIN_INTERVAL_SECONDS` |
 | Paths | `LOG_DIRECTORY`, `PNG_DIRECTORY`, `ALERT_FLAG_FILE`, `ALERT_LOG_FILE` |
 | Plot | `PLOT_INTERVAL_SECONDS`, `PLOT_WIDTH_INCHES`, `PLOT_HEIGHT_INCHES`, `PRESSURE_MIN_UBAR`, `PRESSURE_MAX_UBAR`, `TEMPERATURE_MIN_C`, `TEMPERATURE_MAX_C` |
 | Alerts | `ALERTS_ENABLED`, `ALERT_DURATION_HOURS`, `PRESSURE_THRESHOLD`, `TEMPERATURE_THRESHOLD` |
@@ -129,6 +140,20 @@ is enabled, and an upload destination only when uploads are enabled. Validate
 settings per operation: a disabled optional subsystem must not prevent recording
 or plotting because its credentials are absent. Retain the existing email
 environment variable names for migration.
+
+Serial recovery defaults to enabled. Defaults are a 10-second expected record
+interval, 120-second idle timeout, three failed reopen attempts before considering
+USB reset, and exponential retry delays capped from one to 30 seconds. The idle
+timeout must exceed the configured expected interval; document that instruments
+can transmit as slowly as once per 600 seconds and need corresponding settings.
+A single one-second read timeout is not a fault. Validate positive durations,
+initial delay no greater than maximum delay, and a positive integer attempt count.
+
+USB reset defaults to disabled with blank device identifiers and a 600-second
+minimum interval between reset attempts. When explicitly enabled, require a
+four-digit hexadecimal vendor ID and product ID plus a nonempty USB serial
+number. Identify the physical adapter independently of its changing bus/device
+number or tty name. Never fill `.env.example` with an actual adapter identity.
 
 SMTP defaults to SSL at `smtp.gmail.com:465`. Rclone defaults to the executable
 name `rclone`, resolved on PATH, and copies from `LOG_DIRECTORY`; its destination
@@ -211,6 +236,107 @@ figures after each render. Recalculate the input filename every poll so midnight
 rollover does not depend on process restarts. Missing input files produce a
 bounded diagnostic and retry, not a busy loop.
 
+## Serial stall recovery
+
+Recovery handles the confirmed failure mode: USB bulk reads can stop with `-32`
+while the process remains alive and pyserial continues returning empty reads.
+It is a workaround for the outage, not a claim that the initiating USB defect is
+fixed. `dwc2` remains a separately managed host configuration.
+
+Use this sequence:
+
+1. Open the configured port with the configured baud, 8N1, and finite read timeout.
+   Resolve the configured path on every attempt; recommend `/dev/serial/by-id/` so
+   tty renumbering does not select another adapter.
+2. Track time since the last nonempty received payload with `time.monotonic()`.
+   Give a newly opened port a full idle-timeout window to produce data. Write and
+   durably flush the record before reporting recovery as successful. A successful
+   `open()` alone is not recovery and does not clear the failure counter.
+3. On a pyserial connection/read error, or prolonged empty reads, close the old
+   connection and reopen it with bounded exponential backoff. Use a single owning
+   reader; never start overlapping logger instances. Close resources on shutdown.
+4. After the configured failed-reopen count, consider a USB reset only if enabled,
+   the exact configured identity has one match, and the cooldown has elapsed.
+   Close the tty first, reset that adapter, wait using bounded retry delays for
+   enumeration, then reopen and reapply serial settings. Re-resolve identity and
+   device nodes each time. Count failed reset calls against the cooldown too.
+5. If no unique target exists, access is denied, reset is unsupported, or reopening
+   still fails, log a bounded diagnostic and continue gentle retries. Never
+   escalate automatically to sudo, root execution, controller reset, or Pi reboot.
+   Reset counters only after recording resumes; avoid repeated success messages.
+
+Within the running process, the last-reset timestamp remains in force even if
+data briefly resumes; successful recovery must not bypass the reset cooldown.
+
+Do not reset USB in response to malformed instrument text, a decoding error, an
+SMTP/upload failure, or a data-file write/fsync failure. Report these according
+to their own cause. A fatal storage failure exits nonzero for systemd rather
+than pretending that the record was saved. When serial recovery is explicitly
+disabled, keep ordinary empty-read behavior and let connection errors exit
+nonzero instead of silently swallowing them.
+
+The optional reset implementation uses only the standard library and Linux sysfs
+plus usbfs. Match vendor, product, and serial; reject root hubs, hubs, unmatched
+devices, and ambiguous results. Use current sysfs bus/device numbers only after
+matching, then validate the opened device's identity before resetting; do not
+reset a different device if enumeration changes. Keep device access and timing
+injectable for tests.
+
+Keep the logger unprivileged. README setup for optional USB reset grants raw USB
+access only to the identified adapter, using an administrator-installed udev rule
+and a dedicated group. Explain that this grants raw access to that adapter, not
+merely reset permission. Include generic placeholders, a least-privilege group
+assignment, device-permission verification, and rollback. Do not grant broad
+access to all USB devices or install a privileged helper from a user-writable
+project directory. Permission failure leaves gentle recovery operational.
+
+## Watchdog documentation
+
+Document three separate layers without implying they detect the same faults:
+
+- The logger's data-flow watchdog handles serial silence and connection failures.
+- systemd service supervision restarts an exited logger, using restart delay and
+  start-rate limits. A running process is not proof of data flow. Do not add a
+  service `WatchdogSec=` setting unless a real notification heartbeat is also
+  implemented; such heartbeat support is not part of this change.
+- The optional Pi hardware watchdog is fed by systemd PID 1. It can reset the
+  computer when that heartbeat stops, but a silent serial reader can coexist with
+  a healthy PID 1. It is not a replacement for serial recovery or a guarantee
+  against every kernel/process hang.
+
+The README's optional Pi 3B+/Bookworm procedure must cover:
+
+1. Inspect watchdog sysfs identity/state and existing watchdog ownership/config.
+   Do not probe by reading, writing, or casually opening `/dev/watchdog*`, which
+   can arm the timer. Do not run a separate watchdog daemon alongside PID 1.
+2. Check hardware availability first. If needed, enable `dtparam=watchdog=on` in
+   `/boot/firmware/config.txt`, preserving the existing `dwc2` setting and other
+   configuration. The Pi device-tree default may already enable the device;
+   its presence is separate from arming it for runtime supervision.
+3. Use an opt-in administrator-managed drop-in under
+   `/etc/systemd/system.conf.d/` with a `[Manager]` section,
+   `WatchdogDevice=/dev/watchdog0`, and `RuntimeWatchdogSec=10s`. The manager setting
+   is not a service-unit setting or an application `.env` option. Ten seconds fits
+   the Pi 3's roughly 15-second physical watchdog interval; read back the actual
+   selected timeout rather than promising every requested timeout is supported.
+4. Explain that activation can lead to abrupt automatic reboots and data loss.
+   Back up configuration first, arrange local recovery access, and activate only
+   in a maintenance window with a planned reboot. Provide read-only checks of
+   manager settings, kernel/journal messages, and sysfs timeout/state afterward.
+5. Provide rollback to disable this optional manager configuration, accounting
+   for other drop-ins, watchdog ownership, and `nowayout` settings. Do not claim
+   that deleting one file always immediately disarms an already running timer.
+6. Do not include destructive "test" commands that freeze the kernel, kill PID 1,
+   starve the machine, or intentionally stop watchdog pings. Hardware recovery
+   remains unverified until an operator performs a separate supervised test.
+
+Keep `ttyerror_reboot.sh` as a clearly deprecated legacy artifact, not part of the
+recommended setup. Explain how to locate and disable its existing service, cron,
+or shell launch before enabling the new recovery, so it cannot reboot the Pi
+before gentle recovery runs. Never invent a service name that is not supplied.
+No repository command may enable a watchdog, reboot a Pi, or install permissions
+automatically.
+
 ## Alerts, logging, uploads, and retention
 
 Keep the existing base-derived alert categories and threshold directions for
@@ -277,8 +403,19 @@ headless backend:
 7. Upload/email tests mock every external action; importing scripts has no such
    effects. Rclone arguments preserve paths with spaces and contain no shell use.
 8. Ignore checks exclude local env/runtime artifacts but allow `.env.example` and
-   test fixtures. A fixture-only smoke test renders all styles with network,
-   serial, upload, email, and real-data cleanup disabled.
+    test fixtures. A fixture-only smoke test renders all styles with network,
+    serial, upload, email, and real-data cleanup disabled.
+9. A fake serial connection and fake monotonic clock exercise ordinary read
+   timeouts, idle detection, open/read exceptions, close-before-reopen, recovery
+   only after fresh saved records, retry limits, backoff, shutdown, and rollover
+   during an outage. No test sleeps for a real idle period or opens real serial.
+10. USB-reset tests mock every sysfs/usbfs operation. Cover disabled reset,
+    unique-identity matching, tty renumbering, device-identity changes, permission
+    denial, ambiguous/no matches, hub rejection, ioctl failure, cooldown on failed
+    attempts, and return to gentle retries. Never issue a real USB ioctl in tests.
+11. Review watchdog instructions against the linked systemd 252 and Raspberry Pi
+    sources. Validate example service units without starting them. Do not arm or
+    test an actual hardware watchdog as part of development verification.
 
 Keep the implementation dependency-light: existing python-dotenv, Matplotlib, and
 pyserial plus the standard library. Do not add a daemon framework or database.
