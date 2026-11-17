@@ -1,15 +1,21 @@
 [Unit]
-Description=logging for lyophilizer
-After=multi-user.target
+Description=Lyophilizer serial logger
+After=local-fs.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=exec
-WorkingDirectory=/home/xxxx/Documents/labconco_log
-ExecStart=/home/xxxx/.venv/labconco/bin/python /home/xxxx/Documents/labconco_log/labconco_log.py
-Restart=always
+WorkingDirectory=/opt/lyo_log
+ExecStart=/opt/lyo_log/.venv/bin/python -u /opt/lyo_log/labconco_log.py
+Restart=on-failure
 RestartSec=3s
-User=xxxx
-Group=xxxx
+TimeoutStopSec=15s
+User=lyolog
+Group=lyolog
+SupplementaryGroups=dialout
+UMask=0077
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target

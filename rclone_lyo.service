@@ -1,9 +1,13 @@
 [Unit]
-Description=Rclone upload lyo log
+Description=Upload lyophilizer files with rclone
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/xxxx/Documents/labconco_log
-ExecStart=/home/xxxx/.venv/labconco/bin/python /home/xxxx/Documents/labconco_log/rclone_lyo.py
-User=xxxx
-Group=xxxx
+WorkingDirectory=/opt/lyo_log
+ExecStart=/opt/lyo_log/.venv/bin/python -u /opt/lyo_log/rclone_lyo.py
+User=lyolog
+Group=lyolog
+UMask=0077
+NoNewPrivileges=true

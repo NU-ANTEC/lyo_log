@@ -1,15 +1,19 @@
 [Unit]
-Description=plotting for lyophilizer
+Description=Lyophilizer plot monitor
 After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=exec
-WorkingDirectory=/home/xxxx/Documents/labconco_log
-ExecStart=/home/xxxx/.venv/labconco/bin/python /home/xxxx/Documents/labconco_log/generate_png.py
-Restart=always
+WorkingDirectory=/opt/lyo_log
+ExecStart=/opt/lyo_log/.venv/bin/python -u /opt/lyo_log/generate_png.py
+Restart=on-failure
 RestartSec=3s
-User=xxxx
-Group=xxxx
+User=lyolog
+Group=lyolog
+UMask=0077
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
