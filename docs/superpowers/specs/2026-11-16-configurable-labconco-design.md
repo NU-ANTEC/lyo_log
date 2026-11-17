@@ -16,7 +16,9 @@ documentation. Update example service files where needed, without modifying any
 running Pi or enabling services automatically.
 
 USB recovery, controller configuration, journal retention, instrument control,
-new operating-state alarm policies, and web interfaces are out of scope.
+new operating-state alarm policies, and web interfaces are out of scope. Bulk
+Tray Dryers are excluded because no hardware is available for validation; add no
+bulk parser, configuration mode, plotting layout, or sample-data test suite.
 
 ## References and observed records
 
@@ -28,7 +30,6 @@ Manufacturer references, using the printed page numbers:
 
 - [FreeZone 6, 12 and 18 Liter manual, Chapter 6, pp. 33–34](https://www.labconco.com/download/freezone-6-12-and-18-liter-freeze-dry-systems-ma/2HAAkjkFQE7FvPyN6HxcDw).
 - [Stoppering Tray Dryers manual, Chapter 6, pp. 30–31](https://www.labconco.com/download/freezone-stoppering-tray-dryers-manual/7bTeYHdi1bzTDXRawrIQyJ).
-- [Bulk Tray Dryers manual, Chapter 6, pp. 19–20](https://www.labconco.com/download/freezone-bulk-tray-dryer-manual/6bnQ6Wra7Dl7w99wHq6hf6).
 
 User-supplied fixtures, with no deployment identifiers:
 
@@ -43,17 +44,11 @@ The user confirmed that direct shelf `VAC` values are microbar. All supported
 pressure measurements use µbar; temperatures use °C. Do not infer conversions
 from front-panel display settings.
 
-Stoppering Tray Dryers and Bulk Tray Dryers are different instruments and use
-separate parser families. Combined base-plus-stoppering output and direct
-stoppering-only output are two connection/reporting modes of the same stoppering
-system, not different instrument models. The direct connection bypasses the
-currently faulty base-to-tray communication link and does not carry base telemetry.
-The user has supplied base and stoppering records but does not have a Bulk Tray
-Dryer. Bulk support is manual-derived and unverified on
-hardware. Its documented 4800-baud default is not an observed operating result.
-Fixture tests validate the implementation against the manual, not real-device
-compatibility. Do not require the user to perform a bulk hardware test or change
-the 2400-baud settings on their base/stoppering instruments.
+Combined base-plus-stoppering output and direct stoppering-only output are two
+connection/reporting modes of the same stoppering system, not different instrument
+models. The direct connection bypasses the currently faulty base-to-tray
+communication link and does not carry base telemetry. All three selected modes
+use the existing 2400-baud configuration and the user's actual sample records.
 
 ## Application boundaries
 
@@ -86,7 +81,7 @@ Use these public settings, documented with units and defaults in `.env.example`:
 
 | Group | Settings and behavior |
 | --- | --- |
-| Input mode | `LABCONCO_STYLE=freezone\|stoppering_combined\|stoppering_direct\|bulk` and generic `INSTRUMENT_NAME` |
+| Input mode | `LABCONCO_STYLE=freezone\|stoppering_combined\|stoppering_direct` and generic `INSTRUMENT_NAME` |
 | Serial | `SERIAL_PORT`, optional `SERIAL_BAUDRATE`, `SERIAL_TIMEOUT_SECONDS`; fixed 8N1 |
 | Paths | `LOG_DIRECTORY`, `PNG_DIRECTORY`, `ALERT_FLAG_FILE`, `ALERT_LOG_FILE` |
 | Plot | `PLOT_INTERVAL_SECONDS`, `PLOT_WIDTH_INCHES`, `PLOT_HEIGHT_INCHES`, `PRESSURE_MIN_UBAR`, `PRESSURE_MAX_UBAR`, `TEMPERATURE_MIN_C`, `TEMPERATURE_MAX_C` |
@@ -97,17 +92,15 @@ Use these public settings, documented with units and defaults in `.env.example`:
 | Diagnostics | `LOG_LEVEL`, default `INFO`; permit standard Python severity names |
 
 `LABCONCO_STYLE` is required and selects the reporting mode, not just the model
-family. A missing or blank baud override uses 2400 for `freezone`,
-`stoppering_combined`, and `stoppering_direct`, and 4800 for `bulk`. An explicit
-baud override is allowed. Expected telemetry follows the selected mode; do not
-add a separate base-expectation boolean that could contradict it:
+family. A missing or blank baud override uses 2400 for all three modes. An explicit
+baud override is allowed. Expected telemetry follows the selected mode; do not add
+a separate base-expectation boolean that could contradict it:
 
 | Mode | Serial record | Expected telemetry |
 | --- | --- | --- |
 | `freezone` | `B<...>` | Base only |
 | `stoppering_combined` | `B<...>TD<...>` | Base and stoppering tray |
 | `stoppering_direct` | `:<...>` | Stoppering tray only; base absence is intentional |
-| `bulk` | `RUN/STOP/OPEN, ...` | Bulk trays; manual-derived, not hardware-verified |
 
 Operators switch between combined and direct stoppering connections by changing
 `LABCONCO_STYLE` and restarting the relevant services, without editing Python.
@@ -167,9 +160,9 @@ connection. Frames from an incompatible mode produce a configuration/format
 diagnostic rather than silently changing the selection.
 
 Each parsed record has its time and optional named measurements: collector
-temperature, base pressure, shelf/system temperature, shelf pressure, probes
-1–3, bulk shelves 1–5, and bulk setpoint. Preserve program, segment, state,
-remaining-time, and runtime fields separately from measurements.
+temperature, base pressure, shelf/system temperature, shelf pressure, and probes
+1–3. Preserve program, segment, state, and remaining-time fields separately from
+measurements.
 
 Rules:
 
@@ -183,8 +176,8 @@ Rules:
 - Preserve `INDF`, blank segments, `STNDBY`, and numeric-looking remaining-time
   markers as metadata. Do not convert these fields into temperatures.
 - Convert documented temperature sentinel `999` to unavailable for the relevant
-  sensor fields. Treat bulk `*****` as an absent sensor. Do not treat pressure
-  `999` as missing merely because temperature uses that marker.
+  sensor fields. Do not treat pressure `999` as missing merely because temperature
+  uses that marker.
 - Unknown or invalid measurements are unavailable, never zero. Retain other valid
   channels from a recognized partial record. An invalid timestamp or unrecognized
   frame rejects the record with an aggregated diagnostic, not a traceback or a
@@ -194,19 +187,12 @@ Rules:
 - Preserve timestamp alignment by keeping missing-channel entries as gaps rather
   than joining the previous valid sample to the next across a missing record.
 
-For bulk trays, parse the comma-separated structure: operating state, runtime,
-setpoint, then shelf temperatures. The manual's example labels runtime `T5 = 162`
-before `SP`, while the accompanying table calls it `T`. Accept that documented
-variant by its position before `SP`; shelf `T5` after `SP` remains a separate
-temperature. Test this distinction. Support `RUN`, `STOP`, and `OPEN`; no pressure
-or collector channel exists in that protocol.
-
 ## Plot behavior
 
 Use a headless Matplotlib backend. Plot pressure on a logarithmic axis in µbar
-when the configured style supports it, and temperatures on a linear axis in °C.
+and temperatures on a linear axis in °C.
 Keep the existing daily hour axis and distinguish base and shelf pressure in the
-legend. Plot configured title, source date, bulk setpoint, and available channels.
+legend. Plot configured title, source date, and available channels.
 Legends must not claim that an absent channel has measurements.
 
 For `stoppering_direct`, show shelf pressure, system temperature, and valid
@@ -216,7 +202,7 @@ probes. Omit collector/base traces and annotate `Base telemetry unavailable
 record is unexpected and must be distinguished from intentional direct operation.
 Keep earlier valid base readings as history, with gaps afterward. If no valid
 pressure exists, retain an explicitly labeled unavailable-pressure panel for
-pressure-capable styles. Bulk plots have no pressure panel.
+the selected mode.
 
 Write `YYMMDD.png` into `PNG_DIRECTORY`; default it to the configured log directory
 when omitted to preserve the existing upload layout. Replace completed PNGs
@@ -230,7 +216,8 @@ bounded diagnostic and retry, not a busy loop.
 Keep the existing base-derived alert categories and threshold directions for
 records with valid base pressure and collector temperature. Never apply the
 collector threshold to shelf/system or probe temperatures. For shelf-only and
-bulk records, mark those base-derived checks unavailable rather than healthy.
+other records without valid base telemetry, mark those base-derived checks
+unavailable rather than healthy.
 Unavailable telemetry must not send a recovery notification or clear an existing
 alarm flag. Additional shelf-specific alarm policies are a separate change.
 
@@ -265,14 +252,11 @@ that all use the same project directory/configuration. Recommend unbuffered Pyth
 for service diagnostics. Do not put real credentials in unit files. Explain that
 systemd does not need `EnvironmentFile` because Python loads `.env` itself.
 
-Document configurations for base-only, combined stoppering, direct stoppering-only,
-and bulk-tray installations. Label bulk examples and support as manual-derived,
-unverified on hardware, and separate from the stoppering profile. Preserve the
-explicit baud override for future hardware qualification. Warn that the old
-shelf wrapper no longer selects a profile implicitly. Create and verify `.env`
-before restarting services; restart one operation at a time and verify fresh raw
-data and PNGs. Do not enable email, uploads, or deletion implicitly during
-migration.
+Document configurations for base-only, combined stoppering, and direct
+stoppering-only installations. Warn that the old shelf wrapper no longer selects
+a profile implicitly. Create and verify `.env` before restarting services; restart
+one operation at a time and verify fresh raw data and PNGs. Do not enable email,
+uploads, or deletion implicitly during migration.
 
 Acceptance tests use `unittest`, temporary directories, mocks, and Matplotlib's
 headless backend:
@@ -280,10 +264,10 @@ headless backend:
 1. All four supplied records parse to the expected distinct channels and metadata.
    Combined and direct stoppering samples use their explicitly selected modes;
    mismatched modes produce diagnostics rather than auto-selection.
-2. The manual's bulk example distinguishes runtime from shelf 5; missing sensors,
-   malformed records, compact keys, blanks, and indefinite time are covered.
+2. Missing sensors, malformed records, compact keys, blanks, and indefinite time
+   are covered for the base and both stoppering reporting modes.
 3. Each style creates a nonempty PNG. Tests inspect plotted data/labels for correct
-   units, source separation, missing-data gaps, annotations, and bulk layout.
+   units, source separation, missing-data gaps, and mode-specific annotations.
 4. Configuration tests cover dotenv location, environment precedence, path
    resolution, style/baud defaults, invalid values, and optional subsystem isolation.
 5. Missing base data never becomes a collector measurement, clears an alarm, or
