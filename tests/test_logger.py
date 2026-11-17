@@ -1,0 +1,178 @@
+import tempfile
+import threading
+import unittest
+from dataclasses import replace
+from datetime import datetime, timedelta
+from pathlib import Path
+from unittest.mock import patch
+
+import serial
+
+from lyo_config import load_settings
+
+# A legacy import must fail before it can touch real data or a serial port.
+with patch("os.listdir", side_effect=AssertionError("import attempted cleanup")), \
+     patch("serial.Serial", side_effect=AssertionError("import opened serial")):
+    from labconco_log import purge_old_logs, record_stream
+
+
+class Clock:
+    def __init__(self, start=datetime(2026, 11, 16, 12)):
+        self.value, self.start, self.waits = 0.0, start, []
+
+    def __call__(self):
+        return self.value
+
+    def now(self):
+        return self.start + timedelta(seconds=self.value)
+
+    def wait(self, seconds):
+        self.waits.append(seconds)
+        self.value += seconds
+
+
+class Port:
+    def __init__(self, events, clock, stop):
+        self.events, self.clock, self.stop = list(events), clock, stop
+        self.closed = False
+
+    def readline(self):
+        self.clock.value += 1
+        if not self.events:
+            self.stop.set()
+            return b""
+        event = self.events.pop(0)
+        if isinstance(event, Exception):
+            raise event
+        return event
+
+    def close(self):
+        self.closed = True
+
+
+class LoggerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.settings = load_settings(project_dir=self.root, operation="record",
+                                      environ={"LABCONCO_STYLE": "freezone"})
+        self.settings = replace(self.settings, serial_expected_interval_seconds=1,
+                                serial_idle_timeout_seconds=2)
+        self.clock, self.stop = Clock(), threading.Event()
+
+    def run_stream(self, factory, reset=lambda settings: False, settings=None):
+        return record_stream(settings or self.settings, serial_factory=factory,
+                             clock=self.clock, now=self.clock.now, wait=self.clock.wait,
+                             stop=self.stop, reset=reset)
+
+    def port(self, events):
+        return Port(events, self.clock, self.stop)
+
+    def test_single_timeout_is_not_a_fault_and_records_are_durable_quiet(self):
+        port = self.port([b"", b"payload\n"])
+        with patch("labconco_log.os.fsync") as sync, patch("builtins.print") as printed:
+            count = self.run_stream(lambda **kw: port)
+        self.assertEqual(count, 1)
+        self.assertEqual((self.settings.log_directory / "261116.txt").read_text(),
+                         "120002 payload\n")
+        sync.assert_called_once()
+        printed.assert_not_called()
+        self.assertTrue(port.closed)
+        self.assertEqual(self.clock.waits, [])
+
+    def test_silence_closes_before_reopening_and_reapplies_settings(self):
+        first, second = self.port([b"", b""]), self.port([b"fresh\n"])
+        opened = []
+        def factory(**kwargs):
+            if opened:
+                self.assertTrue(first.closed)
+            opened.append(kwargs)
+            return first if len(opened) == 1 else second
+        self.assertEqual(self.run_stream(factory), 1)
+        self.assertEqual(len(opened), 2)
+        self.assertEqual(opened[1]["baudrate"], 2400)
+        self.assertEqual(opened[1]["timeout"], 1)
+        self.assertTrue(second.closed)
+
+    def test_open_failures_use_capped_backoff(self):
+        attempts = []
+        port = self.port([b"ok\n"])
+        def factory(**kw):
+            attempts.append(kw)
+            if len(attempts) < 6:
+                raise serial.SerialException("unavailable")
+            return port
+        self.assertEqual(self.run_stream(factory, settings=replace(
+            self.settings, serial_retry_max_seconds=4)), 1)
+        self.assertEqual(self.clock.waits, [1, 2, 4, 4, 4])
+
+    def test_read_error_reopens_and_only_data_confirms_recovery(self):
+        ports = [self.port([serial.SerialException("read failed")]),
+                 self.port([b"", b""]), self.port([b"ok\n"])]
+        with self.assertLogs("labconco_log", level="INFO") as captured:
+            self.assertEqual(self.run_stream(lambda **kw: ports.pop(0)), 1)
+        self.assertEqual(sum("recovered" in line.lower() for line in captured.output), 1)
+
+    def test_usb_reset_after_failed_reopen_and_cooldown(self):
+        ports = [self.port([b"", b""]) for _ in range(4)] + [self.port([b"ok\n"])]
+        resets = []
+        def reset(settings):
+            resets.append(self.clock.value)
+            return False
+        self.assertEqual(self.run_stream(lambda **kw: ports.pop(0), reset=reset,
+                         settings=replace(self.settings, usb_reset_enabled=True,
+                                          serial_reopen_attempts=1,
+                                          usb_reset_min_interval_seconds=100)), 1)
+        self.assertEqual(len(resets), 1)
+
+    def test_reset_disabled_and_disabled_recovery(self):
+        first, second = self.port([b"", b""]), self.port([b"ok\n"])
+        ports = [first, second]
+        self.assertEqual(self.run_stream(lambda **kw: ports.pop(0),
+                         reset=lambda settings: self.fail("reset was disabled")), 1)
+        bad = self.port([serial.SerialException("disconnected")])
+        self.stop.clear()
+        with self.assertRaises(serial.SerialException):
+            self.run_stream(lambda **kw: bad, settings=replace(
+                self.settings, serial_recovery_enabled=False))
+        self.assertTrue(bad.closed)
+
+    def test_decode_error_does_not_reset_usb(self):
+        port = self.port([b"\xff\n", b"valid\n"])
+        self.assertEqual(self.run_stream(lambda **kw: port,
+                         reset=lambda settings: self.fail("decode error reset USB")), 1)
+
+    def test_storage_failure_is_not_a_serial_failure(self):
+        port = self.port([b"record\n"])
+        with patch("labconco_log.os.fsync", side_effect=OSError("disk full")):
+            with self.assertRaisesRegex(OSError, "disk full"):
+                self.run_stream(lambda **kw: port,
+                                reset=lambda settings: self.fail("storage failure reset USB"))
+        self.assertTrue(port.closed)
+
+    def test_midnight_rotation_without_process_restart(self):
+        self.clock = Clock(datetime(2026, 11, 16, 23, 59, 58))
+        port = self.port([b"old\n", b"new\n"])
+        self.assertEqual(self.run_stream(lambda **kw: port), 2)
+        self.assertEqual((self.settings.log_directory / "261116.txt").read_text(), "235959 old\n")
+        self.assertEqual((self.settings.log_directory / "261117.txt").read_text(), "000000 new\n")
+
+    def test_opt_in_retention_is_narrow_and_skips_symlinks(self):
+        root = self.settings.log_directory
+        root.mkdir()
+        for name in ("200101.txt", "261116.txt", "notes.txt", "200101.png", "999999.txt"):
+            (root / name).write_text("keep unless old raw log")
+        outside = self.root / "outside.txt"
+        outside.write_text("keep")
+        (root / "190101.txt").symlink_to(outside)
+        self.assertEqual(purge_old_logs(root, 0, datetime(2026, 11, 16).date()), 0)
+        self.assertEqual(purge_old_logs(root, 60, datetime(2026, 11, 16).date()), 1)
+        self.assertFalse((root / "200101.txt").exists())
+        self.assertTrue((root / "190101.txt").is_symlink())
+        self.assertEqual(outside.read_text(), "keep")
+        self.assertTrue((root / "200101.png").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
