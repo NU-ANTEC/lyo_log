@@ -52,6 +52,14 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigError, "LABCONCO_STYLE"):
                 load_settings(project_dir=self.root, environ=values)
 
+    def test_blank_boolean_settings_use_their_safe_defaults(self):
+        settings = self.load(SERIAL_RECOVERY_ENABLED=" ", USB_RESET_ENABLED="",
+                             UPLOAD_ENABLED="", ALERTS_ENABLED="")
+        self.assertTrue(settings.serial_recovery_enabled)
+        self.assertFalse(settings.usb_reset_enabled)
+        self.assertFalse(settings.upload_enabled)
+        self.assertFalse(settings.alerts_enabled)
+
     def test_invalid_numeric_boolean_and_range_settings(self):
         cases = {
             "SERIAL_BAUDRATE": "0", "SERIAL_TIMEOUT_SECONDS": "nan",

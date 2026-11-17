@@ -55,6 +55,20 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(record.measurements["shelf_temperature"], -20)
         self.assertIsNone(record.measurements["probe_1"])
 
+    def test_empty_combined_block_does_not_discard_valid_sibling(self):
+        for tray in ("", " ", "PR=1S=2H TR=INDF"):
+            with self.subTest(tray=tray):
+                record = parse_record(f"000010 B<T=-58V=470>TD<{tray}>", "stoppering_combined")
+                self.assertEqual(record.measurements["base_pressure"], 470)
+                self.assertIsNone(record.measurements["shelf_pressure"])
+                self.assertEqual(record.blocks, frozenset({"base"}))
+        record = parse_record("000010 B<>TD<ST=23V=570>", "stoppering_combined")
+        self.assertEqual(record.measurements["shelf_pressure"], 570)
+        self.assertIsNone(record.measurements["base_pressure"])
+        self.assertEqual(record.blocks, frozenset({"tray"}))
+        with self.assertRaises(ParseError):
+            parse_record("000010 B<>TD< >", "stoppering_combined")
+
     def test_wrong_modes_invalid_frames_and_times(self):
         for line, mode in ((BASE, "stoppering_direct"), (DIRECT, "stoppering_combined"),
                            (COMBINED, "freezone"), (BASE, "bulk"),

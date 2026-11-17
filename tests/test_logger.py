@@ -126,6 +126,30 @@ class LoggerTests(unittest.TestCase):
                                           usb_reset_min_interval_seconds=100)), 1)
         self.assertEqual(len(resets), 1)
 
+    def test_initial_fault_is_not_counted_as_a_failed_reopen(self):
+        ports = [self.port([b"", b""]) for _ in range(4)] + [self.port([b"ok\n"])]
+        opened, reset_after = [], []
+        def factory(**kwargs):
+            opened.append(kwargs)
+            return ports.pop(0)
+        self.assertEqual(self.run_stream(factory,
+                         settings=replace(self.settings, usb_reset_enabled=True,
+                                          serial_reopen_attempts=3),
+                         reset=lambda settings: reset_after.append(len(opened))), 1)
+        self.assertEqual(reset_after, [4])  # Original stalled connection + 3 failed reopens.
+
+    def test_usb_cooldown_survives_a_brief_successful_recovery(self):
+        ports = [self.port([b"", b""]), self.port([b"", b""]),
+                 self.port([b"brief recovery\n", b"", b""]),
+                 self.port([b"", b""]), self.port([b"recovered again\n"])]
+        resets = []
+        self.assertEqual(self.run_stream(lambda **kw: ports.pop(0),
+                         settings=replace(self.settings, usb_reset_enabled=True,
+                                          serial_reopen_attempts=1,
+                                          usb_reset_min_interval_seconds=100),
+                         reset=lambda settings: resets.append(self.clock.value)), 2)
+        self.assertEqual(len(resets), 1)
+
     def test_reset_disabled_and_disabled_recovery(self):
         first, second = self.port([b"", b""]), self.port([b"ok\n"])
         ports = [first, second]
@@ -157,6 +181,13 @@ class LoggerTests(unittest.TestCase):
         self.assertEqual(self.run_stream(lambda **kw: port), 2)
         self.assertEqual((self.settings.log_directory / "261116.txt").read_text(), "235959 old\n")
         self.assertEqual((self.settings.log_directory / "261117.txt").read_text(), "000000 new\n")
+
+    def test_reconnect_outage_spanning_midnight_uses_new_daily_file(self):
+        self.clock = Clock(datetime(2026, 11, 16, 23, 59, 56))
+        ports = [self.port([b"before\n", b"", b""]), self.port([b"after\n"])]
+        self.assertEqual(self.run_stream(lambda **kw: ports.pop(0)), 2)
+        self.assertEqual((self.settings.log_directory / "261116.txt").read_text(), "235957 before\n")
+        self.assertEqual((self.settings.log_directory / "261117.txt").read_text(), "000001 after\n")
 
     def test_opt_in_retention_is_narrow_and_skips_symlinks(self):
         root = self.settings.log_directory

@@ -132,6 +132,8 @@ nonnegative integer, and SMTP port an integer from 1 to 65535. Pressure threshol
 must be positive and finite; temperature thresholds must be finite. Reject
 unrecognized booleans, styles, and nonfinite numbers with setting-specific errors
 that do not print secrets.
+Blank optional booleans use their documented defaults; explicit nonblank values
+must be `true` or `false`.
 
 Alerts, uploads, and data deletion default to disabled, both in the loader and
 the example configuration. Alert duration defaults to 0.25 hours. Thresholds have
@@ -181,6 +183,8 @@ one reporting-mode parser; do not auto-switch modes or fall back after malformed
 input. The two stoppering parsers share channel normalization, but combined and
 direct frames remain explicitly selected. In combined mode, retain measurements
 from a valid partial base or tray block and report the expected missing block.
+This includes an empty or field-less sibling block such as `TD<>`. Reject a
+combined record only when neither block has recognized measurement fields.
 Do not interpret an intentionally selected direct connection as a failed combined
 connection. Frames from an incompatible mode produce a configuration/format
 diagnostic rather than silently changing the selection.
@@ -237,6 +241,10 @@ figures after each render. Recalculate the input filename every poll so midnight
 rollover does not depend on process restarts. Missing input files produce a
 bounded diagnostic and retry, not a busy loop.
 
+Provide `--once --no-alerts` for safe preview rendering: it requires no mail
+credentials and changes no alert state even if `.env` enables alerts. Ordinary
+`--once` retains configured alert behavior, which must be explicit in the README.
+
 ## Serial stall recovery
 
 Recovery handles the confirmed failure mode: USB bulk reads can stop with `-32`
@@ -261,6 +269,7 @@ Use this sequence:
    Close the tty first, reset that adapter, wait using bounded retry delays for
    enumeration, then reopen and reapply serial settings. Re-resolve identity and
    device nodes each time. Count failed reset calls against the cooldown too.
+   The initial stalled/failed connection is not itself a failed reopen attempt.
 5. If no unique target exists, access is denied, reset is unsupported, or reopening
    still fails, log a bounded diagnostic and continue gentle retries. Never
    escalate automatically to sudo, root execution, controller reset, or Pi reboot.

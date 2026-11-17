@@ -99,12 +99,20 @@ def parse_stoppering_combined(payload, measurements):
         raise ParseError("Expected B<...>TD<...> report (partial blocks allowed)")
     blocks = set()
     metadata = {}
-    if match["base"] is not None:
-        _base(match["base"], measurements)
-        blocks.add("base")
-    if match["tray"] is not None:
-        metadata = _shelf(match["tray"], measurements)
-        blocks.add("tray")
+    for name in ("base", "tray"):
+        if match[name] is None:
+            continue
+        try:
+            if name == "base":
+                _base(match[name], measurements)
+            else:
+                metadata = _shelf(match[name], measurements)
+        except ParseError:
+            # Keep a valid sibling; missing channels remain explicit plot gaps.
+            continue
+        blocks.add(name)
+    if not blocks:
+        raise ParseError("Combined report has no recognized measurement block")
     return metadata, frozenset(blocks)
 
 
@@ -294,13 +302,16 @@ def process_log_file(path, settings, output_path=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Render the configured Labconco report mode")
     parser.add_argument("--once", action="store_true", help="render once, then exit")
+    parser.add_argument("--no-alerts", action="store_true",
+                        help="disable email and alarm-state changes (safe preview)")
     parser.add_argument("--input", type=Path, help="dated YYMMDD.txt input (requires --once)")
     parser.add_argument("--output", type=Path, help="PNG destination (requires --once)")
     args = parser.parse_args(argv)
     if (args.input or args.output) and not args.once:
         parser.error("--input and --output require --once")
     try:
-        settings = load_settings()
+        overrides = {**os.environ, "ALERTS_ENABLED": "false"} if args.no_alerts else None
+        settings = load_settings(environ=overrides)
         configure_logging(settings)
         if args.once:
             path = args.input or settings.log_directory / (datetime.now().strftime("%y%m%d") + ".txt")

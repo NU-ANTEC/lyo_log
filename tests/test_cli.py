@@ -2,9 +2,11 @@
 
 import ast
 import os
+import select
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -63,6 +65,20 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(target.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
 
+    def test_no_alerts_preview_needs_no_mail_credentials_or_state_writes(self):
+        self.env.update(ALERTS_ENABLED="true", PRESSURE_THRESHOLD="100",
+                        TEMPERATURE_THRESHOLD="-50", GMAIL_USER="", GMAIL_APP_PASSWORD="",
+                        ALERT_RECIPIENT="", ALERT_FLAG_FILE=str(self.root / "state/flag"),
+                        ALERT_LOG_FILE=str(self.root / "state/alerts.log"))
+        source = self.root / "261116.txt"
+        source.write_text(BASE)
+        target = self.root / "preview.png"
+        result = self.run_cli("generate_png.py", "--once", "--no-alerts", "--input", source,
+                              "--output", target)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(target.exists())
+        self.assertFalse((self.root / "state").exists())
+
     def test_invalid_configuration_exits_before_hardware_or_network(self):
         self.env["LABCONCO_STYLE"] = "unsupported"
         self.env["GMAIL_APP_PASSWORD"] = "do-not-print-this"
@@ -72,6 +88,38 @@ class CliTests(unittest.TestCase):
             self.assertIn("LABCONCO_STYLE", result.stderr)
             self.assertNotIn("do-not-print-this", result.stderr)
         self.assertFalse((self.root / "data").exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX signal/pipe test")
+    def test_sigterm_interrupts_long_retry_wait_without_waiting_for_timeout(self):
+        code = '''
+import serial, threading
+import labconco_log
+class NotifyingEvent(threading.Event):
+    def wait(self, timeout=None):
+        print("waiting", flush=True)
+        return super().wait(timeout)
+def disconnected(**kwargs):
+    raise serial.SerialException("test disconnect")
+labconco_log.threading.Event = NotifyingEvent
+serial.Serial = disconnected
+raise SystemExit(labconco_log.main())
+'''
+        env = {**self.env, "PYTHONPATH": str(ROOT), "SERIAL_RETRY_INITIAL_SECONDS": "30",
+               "SERIAL_RETRY_MAX_SECONDS": "30"}
+        child = subprocess.Popen([sys.executable, "-u", "-c", code], cwd=self.root,
+                                 env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            self.assertTrue(select.select([child.stdout], [], [], 10)[0], "no retry handshake")
+            self.assertEqual(child.stdout.readline(), b"waiting\n")
+            started = time.monotonic()
+            child.terminate()  # Only this private fake-hardware child; never a service/PID 1.
+            _, errors = child.communicate(timeout=3)
+            self.assertEqual(child.returncode, 0, errors.decode())
+            self.assertLess(time.monotonic() - started, 3)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.communicate(timeout=3)
 
     def test_shipped_modules_use_python_310_compatible_syntax(self):
         for name in ("lyo_config.py", "generate_png.py", "generate_png_shelf.py",

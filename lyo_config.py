@@ -78,7 +78,7 @@ def load_settings(env_file=None, environ=None, project_dir=None, operation="plot
         return str(value).strip() if value is not None else str(default)
 
     def boolean(key, default=False):
-        value = text(key, "true" if default else "false").lower()
+        value = (text(key) or ("true" if default else "false")).lower()
         if value not in ("true", "false"):
             raise ConfigError(f"{key} must be true or false")
         return value == "true"

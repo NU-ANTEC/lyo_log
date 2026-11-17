@@ -36,74 +36,74 @@
 
 ## Task 1: Configuration
 
-- [ ] Add tests for location/precedence, path resolution, all three modes, per-operation validation, invalid booleans/numbers/ranges, and quiet safe defaults. Core assertion:
+- [x] Add tests for location/precedence, path resolution, all three modes, per-operation validation, invalid booleans/numbers/ranges, and quiet safe defaults. Core assertion:
   ```python
   settings = load_settings(environ={"LABCONCO_STYLE": "stoppering_direct"}, project_dir=root)
   self.assertEqual(settings.serial_baudrate, 2400)
   self.assertEqual(settings.log_directory, root / "data")
   self.assertFalse(settings.usb_reset_enabled)
   ```
-- [ ] Run `.venv/bin/python -m unittest tests.test_config -v`; confirm missing configuration implementation is the failure.
-- [ ] Implement the typed loader with explicit parsing helpers and operation-specific optional credentials. Add dependencies/example/ignore patterns alongside the consuming feature.
-- [ ] Run configuration tests; commit only the task's files.
+- [x] Run `.venv/bin/python -m unittest tests.test_config -v`; confirm missing configuration implementation is the failure.
+- [x] Implement the typed loader with explicit parsing helpers and operation-specific optional credentials. Add dependencies/example/ignore patterns alongside the consuming feature.
+- [x] Run configuration tests; commit only the task's files.
 
 ## Task 2: Parsers
 
-- [ ] Add the four supplied records as identifier-free fixtures. Assert base pressure 470 differs from shelf pressure 570, direct pressure 24 has no collector, standby/INDF remain metadata, and 999 temperatures become unavailable.
+- [x] Add the four supplied records as identifier-free fixtures. Assert base pressure 470 differs from shelf pressure 570, direct pressure 24 has no collector, standby/INDF remain metadata, and 999 temperatures become unavailable.
   ```python
   record = parse_record(COMBINED, "stoppering_combined")
   self.assertEqual(record.measurements["base_pressure"], 470)
   self.assertEqual(record.measurements["shelf_pressure"], 570)
   ```
-- [ ] Test wrong mode, partial blocks, invalid timestamps, compact field boundaries, missing channels, and malformed frames.
-- [ ] Run `.venv/bin/python -m unittest tests.test_parsers -v`; confirm unavailable parser APIs, without executing the old monitor.
-- [ ] Replace the top-level script with guarded parser/main boundaries; use scoped key extraction rather than positional splits. Record fields: timestamp, measurements dict, metadata dict.
-- [ ] Run parser/config tests and commit.
+- [x] Test wrong mode, partial blocks, invalid timestamps, compact field boundaries, missing channels, and malformed frames.
+- [x] Run `.venv/bin/python -m unittest tests.test_parsers -v`; confirm unavailable parser APIs, without executing the old monitor.
+- [x] Replace the top-level script with guarded parser/main boundaries; use scoped key extraction rather than positional splits. Record fields: timestamp, measurements dict, metadata dict.
+- [x] Run parser/config tests and commit.
 
 ## Task 3: Plotting and alerts
 
-- [ ] Add headless plot tests that inspect axes/line data, pressure units, direct-mode annotations, NaN gaps, historic base traces, and source date. Render real PNGs into temporary directories.
+- [x] Add headless plot tests that inspect axes/line data, pressure units, direct-mode annotations, NaN gaps, historic base traces, and source date. Render real PNGs into temporary directories.
   ```python
   fig = build_figure(records, settings, date(2026, 11, 16))
   self.assertEqual(fig.axes[0].get_yscale(), "log")
   ```
-- [ ] Characterize the existing short-history alert helper; test missing-base suppression and no clearing during unavailability. Test delivered flags only follow successful email delivery.
-- [ ] Run `.venv/bin/python -m unittest tests.test_plotting -v` and observe the missing behavior.
-- [ ] Implement atomic PNG replacement, mode-dependent traces, aggregated parse diagnostics, daily monitor rollover, and alert integration. Keep helper semantics documented rather than redesigning alarm timing.
-- [ ] Replace shelf duplicate with the forwarding entry point. Run all tests and commit.
+- [x] Characterize the existing short-history alert helper; test missing-base suppression and no clearing during unavailability. Test delivered flags only follow successful email delivery.
+- [x] Run `.venv/bin/python -m unittest tests.test_plotting -v` and observe the missing behavior.
+- [x] Implement atomic PNG replacement, mode-dependent traces, aggregated parse diagnostics, daily monitor rollover, and alert integration. Keep helper semantics documented rather than redesigning alarm timing.
+- [x] Replace shelf duplicate with the forwarding entry point. Run all tests and commit.
 
 ## Task 4: Serial and optional USB recovery
 
-- [ ] Add fake-clock/serial tests for one harmless timeout, silence followed by close/reopen, fresh-data confirmation, repeated open errors, capped backoff, optional reset threshold/cooldown, decode/storage failures, shutdown, and midnight rollover. Real file writes use temporary directories.
+- [x] Add fake-clock/serial tests for one harmless timeout, silence followed by close/reopen, fresh-data confirmation, repeated open errors, capped backoff, optional reset threshold/cooldown, decode/storage failures, shutdown, and midnight rollover. Real file writes use temporary directories.
   ```python
   record_stream(settings, serial_factory=factory, clock=clock,
                 wait=clock.wait, now=clock.now, stop=stop, reset=reset)
   self.assertIn("120001 payload", daily_file.read_text())
   ```
-- [ ] Add sysfs fixtures and mocked usbfs tests: disabled reset, exact identity, unique match, hub rejection, renumbering/identity change, access failure, and expected ioctl target.
-- [ ] Run both modules; confirm no real serial/ioctl is accessed and the new APIs fail before implementation.
-- [ ] Implement the logger state machine, safe opt-in cleanup, and isolated USB helper. Keep reset cooldown across brief successful reconnections; no counter reset solely on opening a port.
-- [ ] Run the full suite; commit.
+- [x] Add sysfs fixtures and mocked usbfs tests: disabled reset, exact identity, unique match, hub rejection, renumbering/identity change, access failure, and expected ioctl target.
+- [x] Run both modules; confirm no real serial/ioctl is accessed and the new APIs fail before implementation.
+- [x] Implement the logger state machine, safe opt-in cleanup, and isolated USB helper. Keep reset cooldown across brief successful reconnections; no counter reset solely on opening a port.
+- [x] Run the full suite; commit.
 
 ## Task 5: Mail/upload integration and deployment
 
-- [ ] Test SMTP messages with generic configured labels, disabled integrations, credential isolation, failed delivery, and safe rclone arguments containing spaces. Test subprocess imports have no external effects.
+- [x] Test SMTP messages with generic configured labels, disabled integrations, credential isolation, failed delivery, and safe rclone arguments containing spaces. Test subprocess imports have no external effects.
   ```python
   result = upload(settings)
   self.assertEqual(result, 0)
   self.assertEqual(captured_command[1], "copy")
   ```
-- [ ] Run `.venv/bin/python -m unittest tests.test_integrations -v`; confirm the old unguarded code does not satisfy the new contract.
-- [ ] Implement guarded mail/upload entry points with shared settings; remove duplicate uploader cleanup. Use SMTP_SSL and `subprocess.run([...], check=True)`.
-- [ ] Document configuration migration, optional exact-device udev permissions, service restart/rate limits, and separate hardware watchdog instructions with safe rollback. Deprecate the reboot-on-error script without enabling replacements automatically.
-- [ ] Validate example systemd units without starting them; run all tests and commit.
+- [x] Run `.venv/bin/python -m unittest tests.test_integrations -v`; confirm the old unguarded code does not satisfy the new contract.
+- [x] Implement guarded mail/upload entry points with shared settings; remove duplicate uploader cleanup. Use SMTP_SSL and `subprocess.run([...], check=True)`.
+- [x] Document configuration migration, optional exact-device udev permissions, service restart/rate limits, and separate hardware watchdog instructions with safe rollback. Deprecate the reboot-on-error script without enabling replacements automatically.
+- [x] Validate example systemd units without starting them; run all tests and commit.
 
 ## Task 6: Review, verification, and push
 
-- [ ] Review every spec section against implementation and tests; fix gaps with test-first changes.
-- [ ] Run `.venv/bin/python -m unittest discover -s tests -v`, `.venv/bin/python -m compileall -q` on shipped modules, `.venv/bin/python -m pip check`, `git diff --check`, and behavioral ignore checks.
-- [ ] Run fixture-only PNG smoke tests in a temporary directory and CLI failure-path checks with no real operations enabled. Check Python 3.10 syntax compatibility and available systemd verification tools.
-- [ ] Record exact results and hardware limits in the final handoff. Mark task checkboxes complete as evidence is obtained.
+- [x] Review every spec section against implementation and tests; fix gaps with test-first changes.
+- [x] Run `.venv/bin/python -m unittest discover -s tests -v`, `.venv/bin/python -m compileall -q` on shipped modules, `.venv/bin/python -m pip check`, `git diff --check`, and behavioral ignore checks.
+- [x] Run fixture-only PNG smoke tests in a temporary directory and CLI failure-path checks with no real operations enabled. Check Python 3.10 syntax compatibility and available systemd verification tools.
+- [x] Record exact results and hardware limits in the final handoff. Mark task checkboxes complete as evidence is obtained.
 - [ ] Commit final reviewed changes, verify no secrets/runtime artifacts are tracked, push with `git push -u origin feature/configurable-logger-recovery`, and verify the remote branch SHA.
 
 ## Plan review
@@ -112,3 +112,14 @@ Coverage: configuration and privacy (Task 1); explicit modes and real fixtures (
 plots/legacy alarms (3); logger/retention/USB recovery (4); external integrations,
 services, README/watchdog (5); complete regression/side-effect checks and push (6).
 Hardware recovery is deliberately not claimed by mocked or fixture-only tests.
+
+## Review follow-up
+
+Independent local-worker review covered all implementation modules and deployment
+documents. Follow-up changes have regression tests: blank booleans use defaults,
+valid combined blocks survive an empty sibling, and `--no-alerts` allows previews
+without credentials or alarm-state changes. Tests document the initial-fault vs.
+failed-reopen count, verify reset cooldown across brief recoveries, and prove that
+SIGTERM interrupts a 30-second retry wait. The reviewer observed test additions
+during its read-only pass; all are committed in the final handoff, not foreign
+untracked work. See the verification report for runtime matrices and limitations.

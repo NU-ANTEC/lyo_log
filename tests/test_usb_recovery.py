@@ -91,6 +91,18 @@ class UsbResetTests(unittest.TestCase):
             self.assertFalse(self.reset())
         closed.assert_called_once_with(42)
 
+    def test_serial_identity_change_after_open_prevents_ioctl(self):
+        info = SimpleNamespace(st_mode=stat.S_IFCHR, st_rdev=os.makedev(189, 3))
+        def read_descriptor(*args):
+            (self.node / "serial").write_text("different device")
+            return self.descriptor
+        with patch("usb_recovery.os.open", return_value=42), \
+             patch("usb_recovery.os.fstat", return_value=info), \
+             patch("usb_recovery.os.read", side_effect=read_descriptor), \
+             patch("usb_recovery.os.close"), patch("usb_recovery.fcntl.ioctl") as ioctl:
+            self.assertFalse(self.reset())
+            ioctl.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

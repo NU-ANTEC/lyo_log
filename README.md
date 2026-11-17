@@ -72,6 +72,8 @@ working directory. Process environment variables override `.env`; relative
 filesystem paths resolve against the project directory. Configuration changes
 take effect on process restart. `.env` and local variants are ignored by Git;
 only `.env.example` is tracked. Do not commit credentials or device identifiers.
+Blank optional values use their documented defaults. Use explicit `false` to
+disable a boolean, especially serial recovery, whose default is enabled.
 
 Set at least:
 
@@ -113,11 +115,13 @@ a replacement. The logger requests exclusive serial access on Linux.
 Render one existing file to check parsing before enabling the monitor:
 
 ```bash
-.venv/bin/python generate_png.py --once --input /path/to/YYMMDD.txt --output /path/to/check.png
+.venv/bin/python generate_png.py --once --no-alerts --input /path/to/YYMMDD.txt --output /path/to/check.png
 ```
 
 Replace `YYMMDD.txt` with a real six-digit dated filename. Its date labels the
-plot. Then run the monitor with `.venv/bin/python -u generate_png.py`.
+plot. `--no-alerts` suppresses email and alarm-state changes and does not require
+mail credentials. **Without it, a one-shot render follows `ALERTS_ENABLED` and can
+send real alerts.** Then run the monitor with `.venv/bin/python -u generate_png.py`.
 `generate_png_shelf.py` is a deprecated forwarding entry point: its filename no
 longer chooses the parser. Select the style in `.env` before restarting it.
 
@@ -182,6 +186,9 @@ using a monotonic clock:
 
 Defaults are a 120-second inactivity threshold for a 10-second transmission
 interval, three failed reopens, 1–30-second backoff, and **USB reset disabled**.
+The original faulty connection is not a failed reopen: with a limit of three,
+reset is considered only after the original fault and three unsuccessful
+reconnections. Opening a port without receiving fresh data is unsuccessful.
 Instruments can transmit every 10–600 seconds: set the expected interval correctly
 and the inactivity threshold comfortably above the **actual** interval. Increase
 both for slower reporting. If long silence is normal, either choose a suitable
@@ -372,6 +379,9 @@ not symlinks, unrelated files, or PNGs. Back up data before enabling deletion.
 
 Tests use the real supplied record formats, actual headless PNG rendering,
 temporary data files, fake serial connections/clocks, and mocked SMTP/rclone/USB.
+An isolated POSIX pseudo-terminal also exercises the real pyserial API without
+using a physical serial port. A private fake-hardware child verifies prompt
+SIGTERM shutdown during retry backoff; no running service or PID 1 is signaled.
 No test opens a real serial port, issues a USB reset, arms a watchdog, uploads,
 sends mail, or deletes real instrument data. Hardware recovery and watchdog
 behavior must still be validated separately on the target Pis.
