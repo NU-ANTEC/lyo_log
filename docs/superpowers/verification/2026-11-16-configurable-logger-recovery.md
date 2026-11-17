@@ -2,6 +2,10 @@
 
 Branch: `feature/configurable-logger-recovery`.
 
+Implementation commit `67235101894ca8a951552e3900a311db7aabf547` was pushed to
+`origin/feature/configurable-logger-recovery` and its remote SHA was verified with
+`git ls-remote`. Subsequent publication bookkeeping changes documentation only.
+
 ## Automated results
 
 The final implementation passes **62 tests** in each isolated Linux x86-64

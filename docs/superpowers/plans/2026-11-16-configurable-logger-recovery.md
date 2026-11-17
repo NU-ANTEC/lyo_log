@@ -104,7 +104,7 @@
 - [x] Run `.venv/bin/python -m unittest discover -s tests -v`, `.venv/bin/python -m compileall -q` on shipped modules, `.venv/bin/python -m pip check`, `git diff --check`, and behavioral ignore checks.
 - [x] Run fixture-only PNG smoke tests in a temporary directory and CLI failure-path checks with no real operations enabled. Check Python 3.10 syntax compatibility and available systemd verification tools.
 - [x] Record exact results and hardware limits in the final handoff. Mark task checkboxes complete as evidence is obtained.
-- [ ] Commit final reviewed changes, verify no secrets/runtime artifacts are tracked, push with `git push -u origin feature/configurable-logger-recovery`, and verify the remote branch SHA.
+- [x] Commit final reviewed changes, verify no secrets/runtime artifacts are tracked, push with `git push -u origin feature/configurable-logger-recovery`, and verify the remote branch SHA.
 
 ## Plan review
 
