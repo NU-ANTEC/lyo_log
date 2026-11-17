@@ -25,6 +25,8 @@ All three modes default to **2400 baud, 8N1**. Pressures, including direct `VAC`
 are **µbar**; temperatures are **°C**. Missing temperature markers (`999`), invalid
 values, and absent channels create gaps, not zeros. Program/segment/time metadata
 includes blank segments, `STNDBY`, and `INDF`. Bulk-tray hardware is **not supported**.
+Leading NUL padding before a report is accepted without rewriting the raw logs;
+NUL bytes inside measurement fields are not removed.
 
 Protocol references: [FreeZone manual, pp. 33–34](https://www.labconco.com/download/freezone-6-12-and-18-liter-freeze-dry-systems-ma/2HAAkjkFQE7FvPyN6HxcDw)
 and [Stoppering manual, pp. 30–31](https://www.labconco.com/download/freezone-stoppering-tray-dryers-manual/7bTeYHdi1bzTDXRawrIQyJ).

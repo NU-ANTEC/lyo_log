@@ -94,3 +94,19 @@ The existing short-history alarm-duration behavior is deliberately preserved and
 documented; it is not a guaranteed minimum alarm delay. Bulk-tray hardware remains
 out of scope. No changes were installed on either Pi, and master is not merged or
 pushed by the feature-branch handoff.
+
+## 2026-11-17: direct-tray NUL framing regression
+
+Pi diagnostics revealed a literal NUL byte between the timestamp separator and
+the direct-tray `:<...>` frame. That byte was invisible in the original pasted
+examples. The previous strict frame match rejected these otherwise valid records.
+
+Three regression tests were observed failing before the fix: the five exact
+byte-level samples, padding/embedded-corruption boundaries, and a real one-shot
+PNG render. The parser now removes only leading NUL/space/tab padding before
+dispatch. It does not remove NULs from measurement values or rewrite raw logs.
+
+All **65 tests pass** on Python 3.10.22, 3.11.18, and 3.13.5 with the dependency
+configurations listed above. The exact supplied samples render without rejected
+records, and their input bytes remain unchanged. No hardware operations or alarm
+policy changes are part of this fix.

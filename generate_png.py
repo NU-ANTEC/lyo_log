@@ -137,7 +137,10 @@ def parse_record(line, style):
     except ValueError:
         raise ParseError("Invalid HHMMSS timestamp") from None
     measurements = dict.fromkeys(CHANNELS)
-    metadata, blocks = parsers[style](parts[1].strip(), measurements)
+    # Some instruments prepend NUL padding. Do not erase bytes inside a frame:
+    # doing so could turn a corrupt measurement into a plausible numeric value.
+    payload = parts[1].strip().lstrip("\x00 \t")
+    metadata, blocks = parsers[style](payload, measurements)
     return Record(parts[0], measurements, metadata, blocks)
 
 

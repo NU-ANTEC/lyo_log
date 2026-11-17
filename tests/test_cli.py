@@ -10,7 +10,7 @@ import time
 import unittest
 from pathlib import Path
 
-from tests.fixtures import BASE, COMBINED, DIRECT
+from tests.fixtures import BASE, COMBINED, DIRECT, PADDED_DIRECT_ROWS
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -41,6 +41,19 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(target.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
             self.assertEqual(result.stdout, "")
+
+    def test_actual_nul_padded_log_renders_without_rejected_records(self):
+        self.env["LABCONCO_STYLE"] = "stoppering_direct"
+        source = self.root / "261117.txt"
+        original = b"".join(PADDED_DIRECT_ROWS)
+        source.write_bytes(original)
+        target = self.root / "nul-padding-check.png"
+        result = self.run_cli("generate_png.py", "--once", "--no-alerts", "--input", source,
+                              "--output", target)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Rejected", result.stderr)
+        self.assertEqual(target.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(source.read_bytes(), original)
 
     def test_disabled_mail_and_upload_cli_exit_without_side_effects(self):
         for script in ("send_alert_email.py", "rclone_lyo.py"):
