@@ -160,7 +160,9 @@ def load_settings(env_file=None, environ=None, project_dir=None, operation="plot
         if not args["usb_serial_number"]:
             raise ConfigError("USB_SERIAL_NUMBER is required for USB reset")
     if operation in ("plot", "mail") and args["alerts_enabled"]:
-        for key in ("PRESSURE_THRESHOLD", "TEMPERATURE_THRESHOLD"):
+        thresholds = (("PRESSURE_THRESHOLD",) if style == "stoppering_direct"
+                      else ("PRESSURE_THRESHOLD", "TEMPERATURE_THRESHOLD"))
+        for key in thresholds:
             if args[key.lower()] is None:
                 raise ConfigError(f"{key} is required when alerts are enabled")
         for key in ("GMAIL_USER", "GMAIL_APP_PASSWORD", "ALERT_RECIPIENT"):

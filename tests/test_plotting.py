@@ -77,13 +77,14 @@ class PlotAndAlertTests(unittest.TestCase):
         self.assertTrue(check_continuous_segment([1.0, 1.3], [True, True], 0.25))
 
     def test_missing_base_neither_sends_nor_clears_alarm(self):
-        settings = replace(self.settings, alerts_enabled=True, style="stoppering_direct",
+        settings = replace(self.settings, alerts_enabled=True, style="freezone",
                            pressure_threshold=800, temperature_threshold=-50)
         settings.alert_flag_file.parent.mkdir()
         settings.alert_flag_file.write_text("Vacuum")
         def forbidden(*args):
             self.fail("Missing base must not send an email")
-        result = evaluate_alerts([parse_record(DIRECT, settings.style)], settings, sender=forbidden)
+        record = parse_record(BASE.replace("V=90", "V=HI"), settings.style)
+        result = evaluate_alerts([record], settings, sender=forbidden)
         self.assertEqual(result, "unavailable")
         self.assertEqual(settings.alert_flag_file.read_text(), "Vacuum")
 

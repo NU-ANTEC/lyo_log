@@ -34,7 +34,7 @@ See the [deployment guide](docs/DEPLOYMENT.md) for migration and setup details.
 
 - `labconco_log.py`: records daily raw logs and reconnects after serial silence.
 - `generate_png.py`: parses all three modes and generates daily PNGs.
-- `send_alert_email.py`: sends enabled base-unit alerts.
+- `send_alert_email.py`: sends configured email alerts.
 - `rclone_lyo.py`: uploads files when enabled.
 
 `generate_png_shelf.py` is a compatibility entry point; select the parser in `.env`.

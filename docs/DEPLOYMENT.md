@@ -333,21 +333,51 @@ and [Pi 6.12 BCM2835 driver](https://github.com/raspberrypi/linux/blob/rpi-6.12.
 
 ## Email, uploads, and raw-data retention
 
-**Alarms:** set `ALERTS_ENABLED=true`, choose `PRESSURE_THRESHOLD` (µbar) and
-`TEMPERATURE_THRESHOLD` (°C), and configure the existing `GMAIL_USER`,
+**Alarms:** set `ALERTS_ENABLED=true`, choose `PRESSURE_THRESHOLD` (µbar), and
+configure the existing `GMAIL_USER`,
 `GMAIL_APP_PASSWORD`, and `ALERT_RECIPIENT` keys. `SMTP_HOST`/`SMTP_PORT` default to
 Gmail SSL. Plot titles and email labels use `INSTRUMENT_NAME`; credentials stay
 local. Delivery failures do not set a delivered-alarm flag. Keep alert state on
 persistent storage so a plotter restart does not resend an existing alarm.
 
-The existing base-derived Vacuum/Temperature/Defrosting classification is retained.
+**Direct stoppering tray:** a fresh latest `VAC` reading strictly above
+`PRESSURE_THRESHOLD` triggers a `Shelf pressure` email in every state, including
+`STNDBY`. No collector/system temperature or duration condition is applied;
+`TEMPERATURE_THRESHOLD` may remain blank and `ALERT_DURATION_HOURS` is ignored.
+One email is delivered per high-pressure episode. A valid pressure at or below
+the threshold clears the delivered flag and re-arms the alarm. Failed delivery
+leaves the alarm eligible for retry. A retained flag from the other report profile
+cannot suppress an alarm after switching between direct and base/combined modes.
+Unreadable/corrupt state logs a warning and attempts the current high-pressure
+alert rather than suppressing it. Fix state-file permissions promptly: broken
+state persistence can cause repeated delivery attempts.
+
+Pressure decisions run on changed data at plot polls (`PLOT_INTERVAL_SECONDS`,
+default 60 seconds), not directly in the serial reader. Set this to 10 seconds if
+faster checks are needed. Detection can take a report interval plus a plot interval
+(about 70 seconds at defaults), plus rendering/email time; this is not a hard
+real-time guarantee. Each update reloads the newest record, so a longer plot
+interval does not by itself make that record stale.
+Only the latest record is considered; old high-pressure segments are not replayed.
+The source file's date and record timestamp must be current: readings aged
+`SERIAL_IDLE_TIMEOUT_SECONDS` (default 120 seconds) or more, future-dated readings, and
+invalid/missing pressures are unavailable. They neither send nor clear an alarm.
+Keep the Pi's clock correct. `--no-alerts` continues to suppress all alarm effects.
+
+At the default INFO logging level, unavailable checks produce one WARNING per
+unavailable episode and an INFO message when checks resume. In direct-tray mode,
+a file that stops changing also produces this warning after its idle window; static input is never
+replayed as a new alarm. Check the journal for these messages, not just the
+delivered-alarm flag or service status.
+
+**Base and combined modes:** also set `TEMPERATURE_THRESHOLD` (°C). The existing
+base-derived Vacuum/Temperature/Defrosting classification is retained.
 **Its legacy duration helper can evaluate a short history before
 `ALERT_DURATION_HOURS` has elapsed; that setting is not a guaranteed minimum alarm
 delay.** Review/qualify that policy before relying on alerts. This release does
 not redesign it. With missing base measurements, checks are unavailable, not
-healthy; an existing flag is not cleared. Direct shelf mode does not evaluate
-collector alarms or apply collector thresholds to shelf temperatures. No new
-shelf-specific alarm policy is implied.
+healthy; an existing flag is not cleared. Collector-temperature thresholds are
+never substituted onto shelf temperatures.
 
 **Uploads:** install/configure rclone separately under the service account. Set
 `UPLOAD_ENABLED=true`, `RCLONE_DESTINATION=remote:path`, and optionally

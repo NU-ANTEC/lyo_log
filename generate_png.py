@@ -247,29 +247,56 @@ def check_continuous_segment(hours, condition_mask, min_duration):
     return len(active) >= 2 and active[-1] - active[0] >= min_duration
 
 
-def evaluate_alerts(records, settings, sender=None):
+def _alarm_is_active(flag, alert, style):
+    try:
+        if not flag.exists():
+            return False
+        recorded = flag.read_text(encoding="utf-8").strip()
+    except (OSError, ValueError) as error:
+        LOG.warning("Cannot read delivered-alarm state (%s); attempting current alert",
+                    type(error).__name__)
+        return False
+    # Keep legacy suppression among base alarm types, but not across profiles.
+    return recorded == alert if style == "stoppering_direct" else recorded != "Shelf pressure"
+
+
+def evaluate_alerts(records, settings, sender=None, *, record_date=None, now=None):
     if not settings.alerts_enabled:
         return None
-    if not records or settings.style == "stoppering_direct":
+    if not records:
         return "unavailable"
     latest = records[-1].measurements
-    if latest["base_pressure"] is None or latest["collector_temperature"] is None:
-        return "unavailable"
-    hours = [record.hours for record in records]
-    # Missing points break continuous conditions; they are not healthy samples.
-    cold = [record.measurements["collector_temperature"] is not None
-            and record.measurements["collector_temperature"] < settings.temperature_threshold
-            for record in records]
-    high = [record.measurements["base_pressure"] is not None
-            and record.measurements["base_pressure"] > settings.pressure_threshold
-            for record in records]
-    cold_duration = check_continuous_segment(hours, cold, settings.alert_duration_hours)
-    high_duration = check_continuous_segment(hours, high, settings.alert_duration_hours)
-    alert = ("Vacuum" if cold_duration else "Defrosting") if high_duration else (
-        None if cold_duration else "Temperature")
+    if settings.style == "stoppering_direct":
+        pressure = latest["shelf_pressure"]
+        if pressure is None or record_date is None:
+            return "unavailable"
+        observed = datetime.combine(record_date, datetime.strptime(records[-1].timestamp, "%H%M%S").time())
+        wallclock = datetime.now() if now is None else now
+        age = (wallclock - observed).total_seconds()
+        if not 0 <= age < settings.serial_idle_timeout_seconds:
+            return "unavailable"
+        # Pressure-only in every tray state, including STNDBY. No duration or
+        # temperature gate, and never replay a historical high-pressure segment.
+        alert = "Shelf pressure" if pressure > settings.pressure_threshold else None
+    else:
+        if latest["base_pressure"] is None or latest["collector_temperature"] is None:
+            return "unavailable"
+        hours = [record.hours for record in records]
+        # Missing points break continuous conditions; they are not healthy samples.
+        cold = [record.measurements["collector_temperature"] is not None
+                and record.measurements["collector_temperature"] < settings.temperature_threshold
+                for record in records]
+        high = [record.measurements["base_pressure"] is not None
+                and record.measurements["base_pressure"] > settings.pressure_threshold
+                for record in records]
+        cold_duration = check_continuous_segment(hours, cold, settings.alert_duration_hours)
+        high_duration = check_continuous_segment(hours, high, settings.alert_duration_hours)
+        alert = ("Vacuum" if cold_duration else "Defrosting") if high_duration else (
+            None if cold_duration else "Temperature")
     flag = settings.alert_flag_file
     event = None
-    if alert and not flag.exists():
+    active = _alarm_is_active(flag, alert, settings.style) if alert else False
+    if alert and not active:
         if sender is None:
             from send_alert_email import send_alert
             sender = send_alert
@@ -290,15 +317,32 @@ def evaluate_alerts(records, settings, sender=None):
     return alert
 
 
-def process_log_file(path, settings, output_path=None):
+class AlarmAvailability:
+    """Report loss/recovery of alarm inputs once per transition, not per poll."""
+
+    def __init__(self):
+        self.unavailable = False
+
+    def report(self, status):
+        unavailable = status == "unavailable"
+        if unavailable and not self.unavailable:
+            LOG.warning("Alarm checks unavailable; check required readings, data freshness, "
+                        "the Pi clock, and preceding errors")
+        elif self.unavailable and not unavailable:
+            LOG.info("Alarm checks available again")
+        self.unavailable = unavailable
+
+
+def process_log_file(path, settings, output_path=None, *, availability=None):
     day = datetime.strptime(Path(path).stem, "%y%m%d").date()
     records, rejected = parse_log_file(path, settings.style)
     if rejected:
         LOG.warning("Rejected %d records in %s; check input/report mode", rejected, path)
     target = render_plot(records, settings, day, output_path)
-    status = evaluate_alerts(records, settings)
-    if status == "unavailable":
-        LOG.debug("Base-derived alerts unavailable for current telemetry")
+    status = evaluate_alerts(records, settings, record_date=day)
+    if settings.alerts_enabled:
+        reporter = availability if availability is not None else AlarmAvailability()
+        reporter.report(status)
     return target
 
 
@@ -322,19 +366,28 @@ def main(argv=None):
             return 0
         LOG.info("Plot monitor started (%s)", settings.style)
         last_signature, last_error = None, None
+        availability = AlarmAvailability()
         while True:
             path = settings.log_directory / (datetime.now().strftime("%y%m%d") + ".txt")
             try:
                 stat = path.stat()
                 signature = (path, stat.st_mtime_ns, stat.st_size)
                 if signature != last_signature:
-                    process_log_file(path, settings)
+                    process_log_file(path, settings, availability=availability)
                     last_signature, last_error = signature, None
+                elif settings.alerts_enabled and settings.style == "stoppering_direct":
+                    age = time.time() - stat.st_mtime
+                    if not 0 <= age < settings.serial_idle_timeout_seconds:
+                        # A static file cannot replay or clear an alarm, but its
+                        # loss of live input must remain visible at default logging.
+                        availability.report("unavailable")
             except (OSError, ValueError) as error:
                 message = str(error)
                 if message != last_error:
                     LOG.warning("Plot unavailable: %s", message)
                     last_error = message
+                if settings.alerts_enabled:
+                    availability.report("unavailable")
             time.sleep(settings.plot_interval_seconds)
     except KeyboardInterrupt:
         return 0

@@ -85,6 +85,28 @@ class ConfigurationTests(unittest.TestCase):
             load_settings(project_dir=self.root, operation="upload", environ={
                 "LABCONCO_STYLE": "freezone", "UPLOAD_ENABLED": "true"})
 
+    def test_direct_pressure_alarm_does_not_require_a_temperature_threshold(self):
+        values = {"LABCONCO_STYLE": "stoppering_direct", "ALERTS_ENABLED": "true",
+                  "PRESSURE_THRESHOLD": "800", "GMAIL_USER": "sender@example.invalid",
+                  "GMAIL_APP_PASSWORD": "test-only", "ALERT_RECIPIENT": "to@example.invalid"}
+        for operation in ("plot", "mail"):
+            with self.subTest(operation=operation):
+                settings = load_settings(project_dir=self.root, environ=values, operation=operation)
+                self.assertEqual(settings.pressure_threshold, 800)
+                self.assertIsNone(settings.temperature_threshold)
+        for style in ("freezone", "stoppering_combined"):
+            with self.subTest(style=style), self.assertRaisesRegex(ConfigError, "TEMPERATURE_THRESHOLD"):
+                load_settings(project_dir=self.root, environ={**values, "LABCONCO_STYLE": style})
+
+    def test_direct_alarm_accepts_poll_interval_longer_than_freshness_window(self):
+        settings = self.load(
+            LABCONCO_STYLE="stoppering_direct", ALERTS_ENABLED="true", PRESSURE_THRESHOLD="800",
+            GMAIL_USER="sender@example.invalid", GMAIL_APP_PASSWORD="test-only",
+            ALERT_RECIPIENT="to@example.invalid", PLOT_INTERVAL_SECONDS="60",
+            SERIAL_EXPECTED_INTERVAL_SECONDS="10", SERIAL_IDLE_TIMEOUT_SECONDS="30")
+        self.assertEqual(settings.plot_interval_seconds, 60)
+        self.assertEqual(settings.serial_idle_timeout_seconds, 30)
+
     def test_reset_requires_identity_without_leaking_credentials(self):
         with self.assertRaisesRegex(ConfigError, "USB_VENDOR_ID"):
             self.load(USB_RESET_ENABLED="true")

@@ -110,3 +110,47 @@ All **65 tests pass** on Python 3.10.22, 3.11.18, and 3.13.5 with the dependency
 configurations listed above. The exact supplied samples render without rejected
 records, and their input bytes remain unchanged. No hardware operations or alarm
 policy changes are part of this fix.
+
+## 2026-11-17: direct-tray pressure alarm
+
+The user subsequently approved a direct pressure alarm in all states, including
+`STNDBY`. This is a separate extension to the original base-only alarm scope.
+
+The latest valid shelf `VAC` strictly above `PRESSURE_THRESHOLD` now triggers one
+`Shelf pressure` email per excursion. No temperature or legacy duration condition
+applies in direct mode. A fresh reading at or below threshold re-arms the alarm.
+Missing, invalid, stale, future, or undated readings cannot send or clear it;
+freshness uses the dated source file, its latest record timestamp, and the
+existing serial idle-timeout window. Checks occur at the plot interval, not on
+every serial byte. Existing base/combined alarm classification is unchanged.
+
+New tests were observed failing before implementation. All **88 tests pass** on
+Python 3.10.22, 3.11.18, and 3.13.5, with no actual mail or hardware operations.
+Coverage includes threshold equality, pressure `999` versus missing temperature
+`999`, standby/program states, no delay, no temperature requirement, old base-flag
+migration, duplicate suppression and re-arming, failed delivery, and source-date
+propagation through the file-processing path.
+
+A separate end-to-end smoke check also rendered real PNGs and used the actual
+email-message builder with a fake SMTP server: high pressure delivered once,
+continued high pressure did not duplicate, pressure equal to threshold re-armed,
+and a new excursion delivered again. No network connection was made.
+
+Review follow-ups add deduplicated WARNING/INFO transitions for unavailable and
+recovered alarm inputs, including a static input file. Corrupt/unreadable or
+concurrently removed state cannot silently suppress a current alert. Known
+profile flags migrate in both directions; legacy suppression among base alarm
+categories remains unchanged. These fixes were reproduced with failing tests
+before implementation. Stale file processing is also tested end-to-end.
+
+A proposed review restriction requiring the idle window to exceed the plot
+interval was not applied: every changed-file poll reloads the newest row, not
+the row from the preceding poll. Tests verify that a 60-second plot interval,
+10-second report cadence, and 30-second freshness window are accepted, and that
+a latest reading five seconds old remains eligible. Poll interval affects
+detection latency; it does not inherently determine record age.
+
+The focused read-only review and follow-up review found no remaining blockers.
+The final pipeline smoke also exercised a genuinely invalid UTF-8 state file,
+real PNG rendering and email-message construction with fake SMTP, and switching
+from direct-tray to base alarms; no network connection was made.
