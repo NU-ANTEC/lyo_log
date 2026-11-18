@@ -65,11 +65,19 @@ class IntegrationTests(unittest.TestCase):
                            rclone_destination="example:folder with spaces")
         commands = []
         def run(command, **kwargs):
+            snapshot = Path(command[2])
+            self.assertNotEqual(snapshot, source)
+            self.assertEqual((snapshot / "000101.txt").read_text(), "preserve")
             commands.append((command, kwargs))
             return SimpleNamespace(returncode=0)
         self.assertEqual(upload(settings, runner=run), 0)
-        self.assertEqual(commands, [(["rclone", "copy", str(source), "example:folder with spaces"],
-                                     {"check": True})])
+        self.assertEqual(len(commands), 1)
+        command, kwargs = commands[0]
+        self.assertEqual(len(command), 4)
+        self.assertEqual(command[:2], ["rclone", "copy"])
+        self.assertEqual(command[3], "example:folder with spaces")
+        self.assertEqual(kwargs, {"check": True})
+        self.assertFalse(Path(command[2]).exists())
         self.assertEqual(old.read_text(), "preserve")
 
     def test_upload_failure_returns_nonzero(self):

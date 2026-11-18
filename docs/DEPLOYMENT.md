@@ -382,9 +382,51 @@ never substituted onto shelf temperatures.
 **Uploads:** install/configure rclone separately under the service account. Set
 `UPLOAD_ENABLED=true`, `RCLONE_DESTINATION=remote:path`, and optionally
 `RCLONE_SOURCE`/`RCLONE_EXECUTABLE`. The destination is a remote specification, not
-a local path. Rclone uses `copy`, not `sync`, and the uploader never purges logs.
+a local path. Rclone uses `copy`, not `sync`, and the uploader never deletes
+original files or prunes the remote destination.
 If PNGs are in a separate directory, explicitly choose an upload source that
 contains them. Authentication remains in rclone's protected config.
+
+Each run first makes an independent temporary copy of the source tree, then
+uploads that unchanged snapshot. Live log appends or atomic PNG replacements
+cannot change files while rclone is uploading them. Each file is captured
+separately, not as one simultaneous filesystem-wide snapshot; appends after a
+file's initial captured size wait for the next upload. Unfinished `.plot-*` files
+and symlinks are excluded. File modification times are preserved so unchanged
+history is not uploaded again just because a new snapshot was made.
+
+The snapshot is staged in a private `.lyo-upload-*` directory **beside** the source,
+not inside it or in the Pi's potentially RAM-backed `/tmp`. The service account
+needs write access to the source's parent and free disk space for one complete
+copy of the source tree. Staging failure prevents upload and reports failure;
+normal completion and handled failures remove staging. A power loss or forced
+termination can leave a staging directory behind; inspect it before removing it.
+
+Before switching the service, check source size and free space on the staging
+filesystem (replace these example paths):
+
+```bash
+du -sh /path/to/data
+df -h /path/to
+find /path/to -maxdepth 1 -type d -name '.lyo-upload-*' -print
+```
+
+Leave headroom for new records as well as the snapshot. Avoid running a manual
+uploader alongside the timer: two independent processes need two snapshots.
+
+For multiple destinations, keep the primary in `RCLONE_DESTINATION` and append
+repeatable arguments to the service's `ExecStart`, for example:
+
+```text
+/path/to/.venv/bin/python -u /path/to/rclone_lyo.py --additional-destination second:path
+```
+
+All destinations receive the same snapshot. A failed destination does not prevent
+attempting the others, but any destination failure makes the overall service run
+fail. When replacing an existing uploader, preserve all intended destination
+paths, remove the old command from the service with a blank `ExecStart=`, and
+verify there is only one effective command. Do not run the old retention-bearing
+uploader alongside this one.
 
 Adapt/install `rclone_lyo.service` and `rclone_lyo.timer`, validate the unit, then
 enable the timer only when ready. It runs hourly. Inspect with:
@@ -394,10 +436,22 @@ systemctl list-timers --all rclone_lyo.timer
 sudo journalctl -u rclone_lyo.service --since "1 day ago" --no-pager
 ```
 
-**Retention:** `DATA_RETENTION_DAYS=0` keeps all raw data. A positive value enables
-startup cleanup by the logger alone (use `60` to restore the old policy). Cleanup
-touches only valid dated `YYMMDD.txt` regular files directly in `LOG_DIRECTORY`,
-not symlinks, unrelated files, or PNGs. Back up data before enabling deletion.
+**Retention:** `DATA_RETENTION_DAYS=0` keeps all local logs and PNGs. A positive
+value enables startup cleanup by `labconco_log.py` alone (for example, `60`). It
+deletes files whose filename date is **strictly older** than today minus that many
+days; the exact cutoff date is retained. Cleanup is not a daily timer: changing
+the setting takes effect the next time the logger starts.
+
+Cleanup touches only valid dated `YYMMDD.txt` and `YYMMDD.png` regular files
+directly in `LOG_DIRECTORY`. If `PNG_DIRECTORY` is separate, it also cleans dated
+PNGs there, but not TXT files in that separate directory. A PNG directory that
+does not exist yet is skipped. Symlinks, nested directories, invalid dates, and
+unrelated files are untouched. Remote copies are not deleted. Back up data before
+enabling deletion or restarting the logger with a positive retention value.
+For migration, start with `DATA_RETENTION_DAYS=0`, verify the new logger/uploader,
+then choose a positive value only after backing up and reviewing the dated PNG
+backlog. Directory-access and deletion failures log retention warnings and do
+not prevent serial recording; actual recording/storage errors still fail loudly.
 
 ## Development verification
 

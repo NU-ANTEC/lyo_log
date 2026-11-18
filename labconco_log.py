@@ -16,24 +16,35 @@ from usb_recovery import reset_adapter
 LOG = logging.getLogger(__name__)
 
 
-def purge_old_logs(directory, days, today):
-    """Delete only dated raw regular files, and only when explicitly enabled."""
+def purge_old_logs(directory, days, today, *, extensions=(".txt", ".png")):
+    """Delete expired dated regular data files, only when explicitly enabled."""
     if days <= 0:
         return 0
     cutoff = today - timedelta(days=days)
     deleted = 0
-    for path in directory.iterdir():
-        if path.is_symlink() or not path.is_file() or not re.fullmatch(r"\d{6}\.txt", path.name):
-            continue
+    try:
+        paths = list(directory.iterdir())
+    except FileNotFoundError:
+        return 0  # A separate PNG directory may not have been created yet.
+    except OSError as error:
+        LOG.warning("Retention unavailable for %s: %s", directory, error)
+        return 0
+    for path in paths:
         try:
-            recorded = datetime.strptime(path.stem, "%y%m%d").date()
-        except ValueError:
-            continue
-        if recorded < cutoff:
-            path.unlink()
-            deleted += 1
+            if (path.is_symlink() or not path.is_file() or path.suffix not in extensions
+                    or not re.fullmatch(r"\d{6}", path.stem)):
+                continue
+            try:
+                recorded = datetime.strptime(path.stem, "%y%m%d").date()
+            except ValueError:
+                continue
+            if recorded < cutoff:
+                path.unlink()
+                deleted += 1
+        except OSError as error:
+            LOG.warning("Retention could not remove/check %s: %s", path, error)
     if deleted:
-        LOG.info("Purged %d expired raw log files", deleted)
+        LOG.info("Purged %d expired dated data files", deleted)
     return deleted
 
 
@@ -53,6 +64,9 @@ def record_stream(settings, *, serial_factory=None, clock=time.monotonic,
     serial_factory = serial_factory if serial_factory is not None else serial.Serial
     settings.log_directory.mkdir(parents=True, exist_ok=True)
     purge_old_logs(settings.log_directory, settings.data_retention_days, now().date())
+    if settings.png_directory != settings.log_directory:
+        purge_old_logs(settings.png_directory, settings.data_retention_days, now().date(),
+                       extensions=(".png",))
     connection, output, current_path = None, None, None
     last_input, last_reset = clock(), None
     recovering, failures, saved = False, 0, 0
