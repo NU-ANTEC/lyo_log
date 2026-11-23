@@ -1,30 +1,60 @@
 # lyo_log
-Logger for old Labconco Freezone lyophilizer. At Northwestern University's ANTEC core facility, we operate two mid-2010s Freezone 6 Plus lyophilizers, one with a stoppering shelf. We generated this code to monitor the instrument health and to provide users with sample logs. Tested on Raspberry Pi 3B+ running Bookworm. This set of script was prompt-engineered by ChatGPT and Copilot.
 
-## Requirement
+Logger and daily plots for legacy Labconco FreeZone lyophilizers, with optional
+email alerts and rclone uploads. Designed for Raspberry Pi 3B+ running Bookworm.
 
-- A computer that can run Python
-- Labconco cable for RS-232 (see below for alternative)
-- RS232-USB converter cable
-- Rclone (https://rclone.org) for uploading data
-- Python 3 with pyserial, dotenv and matplotlib. I created a virtual environment and ran python inside.
+## Requirements
 
-## File description
-- labconco_log.py: Records the RS-232 output line by line and outputs file per day. Purges older files at startup.
-- generate_png.py: Outputs PNG plots every minute.
-- generate_png_shelf.py: Outputs PNG plots for shelf lyophilizers. You can set the email alert threshold.
-- send_email_alert.py: Subroutine for sending alert emails. Requires Gmail setup with .env.
+- Python 3.10+ with pyserial, python-dotenv, and matplotlib.
+- Labconco RS-232 cable (or the alternative below) and an RS232-to-USB adapter.
+- [Rclone](https://rclone.org) if uploads are enabled.
 
-Please read manuals from Labconco to understand the output format from the RS-232 port.
-Example systemd services and timers are included.
+## Setup
 
-## Alternative to Labconco cable (P/N 7537800)
-- RJ12 cables (https://www.amazon.com/dp/B0C1VJV1JW/)
-- DB9 to RJ12 converter (https://www.amazon.com/dp/B0779NCTG7/)
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cp -n .env.example .env
+chmod 600 .env
+```
 
-Below is the Labconco cable drawing.
-![image](https://github.com/user-attachments/assets/d1e74c2f-63f0-4bc2-b2db-69833f65bb5d)
+Edit `.env` for your existing data directory, serial port, plot settings, and
+optional alerts/uploads. Select `LABCONCO_STYLE`:
 
-For the DB9-RJ12 converter, you need to connect *the rightmost wire (when looking into the port with notch up) from RJ12* to pin 2 on DB9, and the leftmost wire from RJ12 to pin 5 on DB9. If you flip this, the script will give you garbled readout.
+- `freezone`: base only.
+- `stoppering_combined`: base + stoppering tray.
+- `stoppering_direct`: directly connected stoppering tray, without base data.
 
-We have had issues with ttyUSB0 device locking up (https://github.com/raspberrypi/linux/issues/5211). My workaround has been to monitor with journalctl, and reboot when the log shows this particular error. ttyerror_reboot.sh is included for this purpose.
+All modes default to 2400 baud, 8N1; pressures are µbar and temperatures °C.
+Local `.env` files are ignored by Git. Example systemd services and an upload
+timer are included; adapt their account and paths before installing.
+See the [deployment guide](docs/DEPLOYMENT.md) for migration and setup details.
+
+## Files
+
+- `labconco_log.py`: records daily raw logs and reconnects after serial silence.
+- `generate_png.py`: parses all three modes and generates daily PNGs.
+- `send_alert_email.py`: sends configured email alerts.
+- `rclone_lyo.py`: uploads files when enabled.
+
+`generate_png_shelf.py` is a compatibility entry point; select the parser in `.env`.
+
+## USB recovery and watchdog
+
+The logger tries close/reopen recovery first; adapter-only reset is opt-in.
+Disable the old `ttyerror_reboot.sh` launcher so it does not preempt recovery.
+See [USB recovery](docs/DEPLOYMENT.md#serial-data-watchdog-and-usb-recovery) and
+[hardware-watchdog setup](docs/DEPLOYMENT.md#optional-pi-hardware-watchdog).
+The hardware watchdog monitors Pi responsiveness, not serial data flow.
+
+## Cable wiring
+
+Alternative to Labconco cable P/N 7537800:
+- [RJ12 cable](https://www.amazon.com/dp/B0C1VJV1JW/)
+- [DB9-to-RJ12 adapter](https://www.amazon.com/dp/B0779NCTG7/)
+
+![Labconco RS-232 cable wiring diagram](https://github.com/user-attachments/assets/d1e74c2f-63f0-4bc2-b2db-69833f65bb5d)
+
+Looking into the RJ12 port with the notch up, connect the rightmost wire to DB9
+pin 2 and the leftmost to pin 5. Verify against the instrument manual; reversed
+wiring produces garbled output. Do not connect RS-232 directly to Pi GPIO.

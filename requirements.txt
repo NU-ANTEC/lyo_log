@@ -1,0 +1,4 @@
+# Python 3.10+; Raspberry Pi OS Bookworm uses Python 3.11.
+matplotlib>=3.6,<4
+python-dotenv>=1,<2
+pyserial>=3.5,<4

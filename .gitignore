@@ -25,6 +25,11 @@ build/
 dist/
 
 # Runtime and editor files
+/data/
+/state/
+/output/
+/alert_active.flag
+/alert_log.txt
 *.log
 .vscode/
 .idea/
